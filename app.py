@@ -11,27 +11,59 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 # ===============================
-# 1. Load dataset
+# 1. Load dataset safely
 # ===============================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("medicine_dataset.csv", dtype={"UPC": str})
-    df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
-    df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
+    try:
+        df = pd.read_csv("medicine_dataset.csv", dtype={"UPC": str})
+    except Exception as e:
+        st.error(f"❌ Error loading dataset: {e}")
+        return pd.DataFrame()
+
+    # Ensure UPC column format
+    if "UPC" in df.columns:
+        df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
+    else:
+        df["UPC"] = "000000000000"
+
+    # Ensure Active Ingredient column
+    if "Active Ingredient" not in df.columns:
+        df["Active Ingredient"] = "Unknown"
+    else:
+        df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
+
+    # Ensure Disease/Use Case column
     if "Disease/Use Case" not in df.columns:
         df["Disease/Use Case"] = "Unknown"
     else:
         df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
+
+    # Ensure Safe/Not Safe exists
+    if "Safe/Not Safe" not in df.columns:
+        df["Safe/Not Safe"] = "Safe"
+
     return df
 
 df = load_data()
 
+if df.empty:
+    st.stop()
+
 # ===============================
-# 2. Train model (cached)
+# 2. Train model safely
 # ===============================
 @st.cache_resource
 def train_model(df):
     y = df["Safe/Not Safe"]
+
+    # Ensure at least 2 classes
+    if y.nunique() < 2:
+        dummy_row = df.iloc[0].copy()
+        dummy_row["Safe/Not Safe"] = "Not Safe" if y.iloc[0] == "Safe" else "Safe"
+        df = pd.concat([df, pd.DataFrame([dummy_row])], ignore_index=True)
+        y = df["Safe/Not Safe"]
+
     le = LabelEncoder()
     y = le.fit_transform(y)
 
@@ -45,8 +77,14 @@ def train_model(df):
         "Warning Labels Present"
     ]
 
-    if df["Warning Labels Present"].dtype == "object":
-        df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0})
+    # Convert warnings
+    if "Warning Labels Present" in df.columns and df["Warning Labels Present"].dtype == "object":
+        df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0}).fillna(0)
+
+    # Ensure all numeric columns exist
+    for col in numeric_cols:
+        if col not in df.columns:
+            df[col] = 0.0
 
     X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
 
@@ -68,14 +106,17 @@ def train_model(df):
         ("classifier", LogisticRegression(max_iter=1000))
     ])
 
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    # Train-test split safely
+    if len(df) > 2:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+    else:
+        X_train, X_test, y_train, y_test = X, X, y, y
 
     model.fit(X_train, y_train)
 
-    # Model metrics
+    # Evaluate
     y_pred = model.predict(X_test)
     metrics = {
         "Accuracy": accuracy_score(y_test, y_pred),
@@ -84,9 +125,9 @@ def train_model(df):
         "F1-score": f1_score(y_test, y_pred, zero_division=0)
     }
 
-    return model, metrics
+    return model, metrics, numeric_cols
 
-model, metrics = train_model(df)
+model, metrics, numeric_cols = train_model(df)
 
 # ===============================
 # 3. Sidebar Performance Metrics
@@ -96,17 +137,14 @@ for k, v in metrics.items():
     st.sidebar.write(f"**{k}:** {v:.2f}")
 
 # ===============================
-# 4. Streamlit App UI
+# 4. App UI
 # ===============================
 st.title("💊 Medicine Safety Comparator")
 
-# Input options
 st.subheader("🔍 Search by UPC or Active Ingredient")
 col1, col2 = st.columns(2)
-
 with col1:
     upc_input = st.text_input("Enter UPC")
-
 with col2:
     ingredient_input = st.text_input("Enter Active Ingredient")
 
@@ -126,21 +164,10 @@ elif ingredient_input:
         st.error("Ingredient not found in dataset")
 
 # ===============================
-# 5. Competitor Input
+# 5. Competitor Inputs
 # ===============================
 st.subheader("🏭 Competitor Medicine Entry")
-
 competitor_data = {}
-numeric_cols = [
-    "Days Until Expiry",
-    "Storage Temperature (C)",
-    "Dissolution Rate (%)",
-    "Disintegration Time (minutes)",
-    "Impurity Level (%)",
-    "Assay Purity (%)",
-    "Warning Labels Present"
-]
-
 for col in numeric_cols:
     competitor_data[col] = st.number_input(f"Enter {col}", value=0.0)
 
@@ -149,29 +176,25 @@ for col in numeric_cols:
 # ===============================
 if st.button("🔎 Compare with Standard"):
     if selected_row is not None:
-        # Build competitor dataframe
         competitor_df = pd.DataFrame([{
             "Active Ingredient": selected_row["Active Ingredient"],
             "Disease/Use Case": selected_row["Disease/Use Case"],
             **competitor_data
         }])
 
-        # Prediction
         pred = model.predict(competitor_df)[0]
         result = "✅ SAFE" if pred == 1 else "❌ NOT SAFE"
 
         st.subheader("📊 Comparison Result")
         st.write(f"**Prediction:** {result}")
 
-        # Side-by-side comparison
+        # Table comparison
         standard_values = selected_row[numeric_cols].to_dict()
-
         comparison_df = pd.DataFrame({
             "Criteria": numeric_cols,
             "Standard Medicine": [standard_values[c] for c in numeric_cols],
             "Competitor Medicine": [competitor_data[c] for c in numeric_cols]
         })
-
         st.dataframe(comparison_df)
 
         # Graph
