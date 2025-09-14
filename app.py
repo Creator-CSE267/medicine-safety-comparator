@@ -1,28 +1,99 @@
-# ==========================================
-# app.py - Medicine Safety Comparator (Streamlit)
-# ==========================================
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
 from datetime import datetime
 
 # ===============================
 # 1. Load dataset
 # ===============================
 DATA_FILE = "medicine_dataset.csv"
-LOG_FILE = "competitor_comparison_log.csv"
+LOG_FILE = "usage_log.csv"
 
-@st.cache_data
-def load_data():
-    df = pd.read_csv(DATA_FILE)
-    return df
+df = pd.read_csv(DATA_FILE, dtype={"UPC": str})
+df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
 
-df = load_data()
+# Fill missing values
+df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
+if "Disease/Use Case" not in df.columns:
+    df["Disease/Use Case"] = "Unknown"
+else:
+    df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
+
+# Target
+if "Safe/Not Safe" not in df.columns:
+    df["Safe/Not Safe"] = "Safe"
+
+y = df["Safe/Not Safe"]
+le = LabelEncoder()
+y = le.fit_transform(y)
+
+# Add dummy row if dataset has only 1 class
+if len(np.unique(y)) < 2:
+    dummy_row = df.iloc[0].copy()
+    dummy_row["Active Ingredient"] = "DummyUnsafe"
+    dummy_row["Safe/Not Safe"] = "Not Safe"
+    df = pd.concat([df, pd.DataFrame([dummy_row])], ignore_index=True)
+    y = df["Safe/Not Safe"]
+    y = le.fit_transform(y)
+
+# Feature columns
+numeric_cols = [
+    "Days Until Expiry",
+    "Storage Temperature (C)",
+    "Dissolution Rate (%)",
+    "Disintegration Time (minutes)",
+    "Impurity Level (%)",
+    "Assay Purity (%)",
+    "Warning Labels Present"
+]
+
+if df["Warning Labels Present"].dtype == "object":
+    df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0})
+
+X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
 
 # ===============================
-# 2. Safety Rules
+# 2. Train model
+# ===============================
+def train_model(X, y):
+    numeric_transformer = Pipeline(steps=[
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler())
+    ])
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("text_ing", TfidfVectorizer(max_features=50), "Active Ingredient"),
+            ("text_dis", TfidfVectorizer(max_features=50), "Disease/Use Case"),
+            ("num", numeric_transformer, numeric_cols)
+        ]
+    )
+
+    model = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("classifier", LogisticRegression(max_iter=1000))
+    ])
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+    model.fit(X_train, y_train)
+    return model
+
+model = train_model(X, y)
+
+# ===============================
+# 3. Safety rules
 # ===============================
 SAFETY_RULES = {
     "Days Until Expiry": {"min": 30},
@@ -31,12 +102,9 @@ SAFETY_RULES = {
     "Disintegration Time (minutes)": {"max": 30},
     "Impurity Level (%)": {"max": 2},
     "Assay Purity (%)": {"min": 90},
-    "Warning Labels Present": {"min": 1},
+    "Warning Labels Present": {"min": 1}
 }
 
-# ===============================
-# 3. Helper Functions
-# ===============================
 def is_safe(value, col):
     rule = SAFETY_RULES.get(col, {})
     if "min" in rule and value < rule["min"]:
@@ -49,135 +117,103 @@ def is_safe(value, col):
             return False
     return True
 
-def generate_report(values, labels, medicine_name):
-    report = []
-    for v, col in zip(values, labels):
-        safe = is_safe(v, col)
-        status = "✅ Safe" if safe else "❌ Not Safe"
-        report.append(f"{col}: {v} --> {status}")
-    return report
-
-def log_result(upc, ingredient, competitor_values, result):
-    log_entry = {
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "UPC": upc,
-        "Active Ingredient": ingredient,
-        "Result": result,
-    }
-    log_entry.update(competitor_values)
-
-    if os.path.exists(LOG_FILE):
-        df_log = pd.read_csv(LOG_FILE)
-        df_log = pd.concat([df_log, pd.DataFrame([log_entry])], ignore_index=True)
-    else:
-        df_log = pd.DataFrame([log_entry])
-
-    df_log.to_csv(LOG_FILE, index=False)
-
 # ===============================
-# 4. Streamlit App UI
+# 4. Streamlit UI
 # ===============================
-st.set_page_config(page_title="💊 Medicine Safety Comparator", layout="wide")
 st.title("💊 Medicine Safety Comparator")
-st.write("Compare competitor medicines vs standard dataset medicines.")
+st.write("Compare competitor medicines against your standard dataset.")
 
-# Search Mode
-mode = st.radio("Search by:", ["UPC", "Active Ingredient"])
+# Lookup section
+st.subheader("🔍 Search by UPC or Active Ingredient")
 
-if mode == "UPC":
+col1, col2 = st.columns(2)
+with col1:
     upc_input = st.text_input("Enter UPC:")
-    selected_row = df[df["UPC"].astype(str) == upc_input]
-elif mode == "Active Ingredient":
+with col2:
     ingredient_input = st.text_input("Enter Active Ingredient:")
-    selected_row = df[df["Active Ingredient"].str.lower() == ingredient_input.lower()]
 
-if selected_row is not None and not selected_row.empty:
-    st.success("✅ Standard medicine found!")
-    st.write(selected_row)
+# Auto-fill based on UPC/ingredient
+selected_row = None
+if upc_input:
+    match = df[df["UPC"] == upc_input]
+    if not match.empty:
+        selected_row = match.iloc[0]
+        ingredient_input = selected_row["Active Ingredient"]
+        st.success(f"✅ UPC found → Active Ingredient: {ingredient_input}")
+    else:
+        st.error("❌ UPC not found in dataset.")
 
-    # Extract standard medicine values
-    labels = list(SAFETY_RULES.keys())
-    standard_values = [selected_row.iloc[0][col] for col in labels]
+elif ingredient_input:
+    match = df[df["Active Ingredient"].str.lower() == ingredient_input.lower()]
+    if not match.empty:
+        selected_row = match.iloc[0]
+        upc_input = selected_row["UPC"]
+        st.success(f"✅ Ingredient found → UPC: {upc_input}")
+    else:
+        st.error("❌ Ingredient not found in dataset.")
 
-    # Competitor Input
-    st.subheader("🏭 Enter Competitor Medicine Values")
-    competitor_values = {}
-    for col in labels:
-        competitor_values[col] = st.number_input(
-            f"{col}:", value=float(standard_values[labels.index(col)]), step=1.0
-        )
+# Competitor input
+st.subheader("🏭 Competitor Medicine Entry")
+competitor_values = {}
+for col in numeric_cols:
+    competitor_values[col] = st.number_input(f"{col}:", value=0.0)
 
-    # Compare Button
-    if st.button("🔍 Compare"):
-        competitor_vals_list = [competitor_values[col] for col in labels]
+# ===============================
+# 5. Compare Button
+# ===============================
+if st.button("🔎 Compare"):
+    if selected_row is None:
+        st.error("⚠️ Please enter a valid UPC or Ingredient first.")
+    else:
+        # Build competitor dataframe
+        input_data = {"Active Ingredient": ingredient_input, "Disease/Use Case": "Unknown"}
+        for col in numeric_cols:
+            input_data[col] = competitor_values[col]
+        competitor_df = pd.DataFrame([input_data])
 
-        # Safety reports
-        st.subheader("📊 Safety Reports")
-        st.write("**Standard Medicine**")
-        for line in generate_report(standard_values, labels, "Standard Medicine"):
-            st.write(line)
+        # Predictions
+        pred = model.predict(competitor_df)[0]
+        result = le.inverse_transform([pred])[0]
 
-        st.write("**Competitor Medicine**")
-        comp_report = generate_report(competitor_vals_list, labels, "Competitor Medicine")
-        for line in comp_report:
-            st.write(line)
+        base_values = [selected_row[col] for col in numeric_cols]
+        comp_values = [competitor_values[col] for col in numeric_cols]
 
-        # Final Result
-        final_result = (
-            "Safe" if all(is_safe(v, c) for v, c in zip(competitor_vals_list, labels)) else "Not Safe"
-        )
-        st.subheader(f"✅ Final Prediction: {final_result}")
+        st.success(f"✅ Competitor Prediction: {result}")
 
-        # Log Results
-        log_result(
-            upc=selected_row.iloc[0]["UPC"],
-            ingredient=selected_row.iloc[0]["Active Ingredient"],
-            competitor_values=competitor_values,
-            result=final_result,
-        )
-
-        # Plot Comparison
-        x = np.arange(len(labels))
+        # Bar chart
+        x = np.arange(len(numeric_cols))
         width = 0.35
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.bar(x - width/2, standard_values, width, label="Standard", color="green")
-        ax.bar(x + width/2, competitor_vals_list, width, label="Competitor", color="red")
-        ax.set_ylabel("Values")
-        ax.set_title("Medicine Criteria Comparison")
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
+        ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=30, ha="right")
+        ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
+        ax.set_title("Medicine Criteria Comparison")
         ax.legend()
         st.pyplot(fig)
 
+        # Log usage
+        log_entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "UPC": upc_input,
+            "Ingredient": ingredient_input,
+            "Result": result
+        }
+        log_df = pd.DataFrame([log_entry])
+        if not os.path.exists(LOG_FILE):
+            log_df.to_csv(LOG_FILE, index=False)
+        else:
+            log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+
 # ===============================
-# 5. Performance Dashboard
+# 6. Dashboard
 # ===============================
-st.header("📈 Performance Dashboard")
+st.subheader("📊 Performance Dashboard")
+
 if os.path.exists(LOG_FILE):
-    log_df = pd.read_csv(LOG_FILE)
+    logs = pd.read_csv(LOG_FILE)
+    st.write("Recent Usage Logs:", logs.tail(10))
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Tests", len(log_df))
-    col2.metric("Safe Medicines", sum(log_df["Result"] == "Safe"))
-    col3.metric("Not Safe Medicines", sum(log_df["Result"] == "Not Safe"))
-
-    # Daily test counts
-    log_df["Date"] = pd.to_datetime(log_df["Timestamp"]).dt.date
-    daily_counts = log_df.groupby("Date").size()
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    daily_counts.plot(kind="bar", ax=ax)
-    ax.set_title("Daily Tests Performed")
-    st.pyplot(fig)
-
-    # Safe vs Not Safe Pie Chart
-    fig, ax = plt.subplots()
-    log_df["Result"].value_counts().plot.pie(
-        autopct="%1.1f%%", startangle=90, ax=ax, colors=["green", "red"]
-    )
-    ax.set_ylabel("")
-    ax.set_title("Safe vs Not Safe Distribution")
-    st.pyplot(fig)
-
+    st.line_chart(logs["Result"].value_counts())
 else:
-    st.info("No logs yet. Run a comparison first!")
+    st.info("No logs yet. Run some comparisons to see dashboard data.")
