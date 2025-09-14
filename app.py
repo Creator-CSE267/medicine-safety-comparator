@@ -11,7 +11,7 @@ from datetime import datetime
 # ===============================
 # 1. Load dataset
 # ===============================
-DATA_FILE = "medicine_with_expiry_final.csv"
+DATA_FILE = "medicine_dataset.csv"
 LOG_FILE = "competitor_comparison_log.csv"
 
 @st.cache_data
