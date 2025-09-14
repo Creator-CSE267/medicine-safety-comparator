@@ -19,7 +19,7 @@ from datetime import datetime
 # ===============================
 # 1. Load dataset
 # ===============================
-file_path = "medicine_with_expiry_final.csv"
+file_path = "medicine_dataset.csv"
 df = pd.read_csv(file_path)
 
 # Clean UPC (prevent scientific notation issues)
