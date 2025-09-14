@@ -1,12 +1,12 @@
 # ==========================================
-# Medicine Safety Comparator (Streamlit App)
+# Medicine Safety Comparator App (Streamlit)
 # ==========================================
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler, FunctionTransformer
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.compose import ColumnTransformer
@@ -16,7 +16,7 @@ from sklearn.impute import SimpleImputer
 # ===============================
 # 1. Load dataset
 # ===============================
-file_path = "medicine_dataset.csv"   # ✅ Updated to your file
+file_path = "medicine_dataset.csv"
 df = pd.read_csv(file_path)
 
 # Clean column names
@@ -30,11 +30,16 @@ df = df.rename(columns={"Storage Temperature (CC)": "Storage Temperature (C)"})
 df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
 df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
 
-# Ensure UPC is string (avoid scientific notation like 3.18E+11)
-if "UPC" in df.columns:
-    df["UPC"] = df["UPC"].astype(str)
+# ===============================
+# 2. Ensure at least 2 classes
+# ===============================
+if df["Safe/Not Safe"].nunique() < 2:
+    dummy_row = df.iloc[0].copy()
+    dummy_row["Active Ingredient"] = "DummyDrug"
+    dummy_row["Safe/Not Safe"] = "Not Safe"   # Force unsafe
+    df = pd.concat([df, pd.DataFrame([dummy_row])], ignore_index=True)
 
-# Target column
+# Target
 y = df["Safe/Not Safe"]
 le = LabelEncoder()
 y = le.fit_transform(y)
@@ -55,114 +60,92 @@ if df["Warning Labels Present"].dtype == "object":
 
 X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
 
-# ===============================
-# 2. Preprocessor + Model
-# ===============================
-
-# Numeric transformer
+# Preprocessor
 numeric_transformer = Pipeline(steps=[
     ("imputer", SimpleImputer(strategy="median")),
     ("scaler", StandardScaler())
 ])
 
-# Helper function for text column extraction
-def get_column(name):
-    return FunctionTransformer(lambda x: x[name], validate=False)
-
-# Preprocessor
 preprocessor = ColumnTransformer(
     transformers=[
-        ("ing", Pipeline([
-            ("selector", get_column("Active Ingredient")),
-            ("tfidf", TfidfVectorizer(max_features=50))
-        ]), "Active Ingredient"),
-        ("dis", Pipeline([
-            ("selector", get_column("Disease/Use Case")),
-            ("tfidf", TfidfVectorizer(max_features=50))
-        ]), "Disease/Use Case"),
-        ("num", numeric_transformer, numeric_cols),
+        ("text_ing", TfidfVectorizer(max_features=50), "Active Ingredient"),
+        ("text_dis", TfidfVectorizer(max_features=50), "Disease/Use Case"),
+        ("num", numeric_transformer, numeric_cols)
     ]
 )
 
-# Model
+# Model pipeline
 model = Pipeline(steps=[
     ("preprocessor", preprocessor),
     ("classifier", LogisticRegression(max_iter=1000))
 ])
 
 # Train-test split
-if len(np.unique(y)) < 2:
-    st.error("❌ Dataset contains only one class in 'Safe/Not Safe'. Logistic Regression needs at least 2.")
-else:
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-    model.fit(X_train, y_train)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+model.fit(X_train, y_train)
 
 # ===============================
 # 3. Streamlit UI
 # ===============================
 st.title("💊 Medicine Safety Comparator")
+st.write("Compare your medicine against standard dataset medicines.")
 
-# Search by UPC or Active Ingredient
-search_mode = st.radio("Search medicine by:", ["UPC", "Active Ingredient"])
-
-selected_medicine = None
-if search_mode == "UPC":
-    upc_input = st.text_input("Enter UPC:")
+# User search options
+search_type = st.radio("🔍 Search medicine by:", ["UPC", "Active Ingredient"])
+if search_type == "UPC":
+    upc_input = st.text_input("Enter UPC code:")
     if upc_input:
-        selected_medicine = df[df["UPC"] == upc_input]
-elif search_mode == "Active Ingredient":
-    ingredient_input = st.selectbox("Select Active Ingredient:", df["Active Ingredient"].unique())
-    selected_medicine = df[df["Active Ingredient"] == ingredient_input]
+        match = df[df["UPC"].astype(str) == str(upc_input)]
+        if not match.empty:
+            user_tablet = match["Active Ingredient"].values[0]
+            st.success(f"UPC found → Active Ingredient: {user_tablet}")
+        else:
+            st.error("UPC not found in dataset.")
+            user_tablet = None
+else:
+    user_tablet = st.text_input("Enter Active Ingredient:")
 
-# If medicine is found, auto-fetch details
-if selected_medicine is not None and not selected_medicine.empty:
-    st.success(f"✅ Found medicine: {selected_medicine.iloc[0]['Active Ingredient']}")
-    st.write("Standard Medicine Data:", selected_medicine)
+user_disease = st.text_input("Enter Disease/Use Case")
 
-    # Manual competitor input
-    st.subheader("🏭 Enter Competitor Medicine Data")
-    competitor_data = {}
-    for col in numeric_cols:
-        competitor_data[col] = st.number_input(
-            f"{col}", 
-            value=float(selected_medicine.iloc[0][col]),
-            step=1.0
-        )
+# Collect feature inputs
+st.subheader("Enter Medicine Test Values")
+user_features = {}
+for col in numeric_cols:
+    user_features[col] = st.number_input(f"{col}", value=0.0)
 
-    competitor_input = {
-        "Active Ingredient": st.text_input("Competitor Active Ingredient"),
-        "Disease/Use Case": st.text_input("Competitor Disease/Use Case")
-    }
-    competitor_input.update(competitor_data)
+# Prediction button
+if st.button("🔮 Predict Safety"):
+    if user_tablet:
+        input_data = {"Active Ingredient": user_tablet, "Disease/Use Case": user_disease}
+        for col in numeric_cols:
+            input_data[col] = user_features[col]
+        input_df = pd.DataFrame([input_data])
 
-    comp_df = pd.DataFrame([competitor_input])
+        pred = model.predict(input_df)[0]
+        result = le.inverse_transform([pred])[0]
 
-    if st.button("🔍 Compare Safety"):
-        # Predictions
-        comp_pred = model.predict(comp_df)[0]
-        comp_result = le.inverse_transform([comp_pred])[0]
+        st.subheader(f"✅ Prediction Result: **{result}**")
 
-        std_pred = model.predict(selected_medicine)[0]
-        std_result = le.inverse_transform([std_pred])[0]
+        # Pick a random standard medicine to compare
+        other_sample = df.sample(1, random_state=10)
+        other_pred = model.predict(other_sample)[0]
+        other_result = le.inverse_transform([other_pred])[0]
 
-        st.write("📌 Standard Medicine Safety:", std_result)
-        st.write("📌 Competitor Medicine Safety:", comp_result)
+        st.write(f"📌 Comparing with dataset medicine: **{other_sample['Active Ingredient'].values[0]}** → {other_result}")
 
-        # ===============================
-        # Graph Comparison
-        # ===============================
+        # Bar chart comparison
         labels = numeric_cols
-        user_values = [competitor_input[col] for col in numeric_cols]
-        std_values = [selected_medicine.iloc[0][col] for col in numeric_cols]
+        user_values = [input_data[col] for col in numeric_cols]
+        other_values = [other_sample[col].values[0] for col in numeric_cols]
 
         x = np.arange(len(labels))
         width = 0.35
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        rects1 = ax.bar(x - width/2, std_values, width, label="Standard Medicine", color="green")
-        rects2 = ax.bar(x + width/2, user_values, width, label="Competitor", color="red")
+        fig, ax = plt.subplots(figsize=(12,6))
+        rects1 = ax.bar(x - width/2, user_values, width, label="Your Medicine", color="green" if result=="Safe" else "red")
+        rects2 = ax.bar(x + width/2, other_values, width, label="Dataset Medicine", color="blue")
 
         ax.set_ylabel("Values")
         ax.set_title("Medicine Criteria Comparison")
@@ -170,16 +153,14 @@ if selected_medicine is not None and not selected_medicine.empty:
         ax.set_xticklabels(labels, rotation=30, ha="right")
         ax.legend()
 
-        # Add labels
-        def autolabel(rects):
-            for rect in rects:
-                height = rect.get_height()
-                ax.annotate(f"{height:.1f}",
-                            xy=(rect.get_x() + rect.get_width()/2, height),
-                            xytext=(0, 3),
-                            textcoords="offset points",
-                            ha="center", va="bottom")
-        autolabel(rects1)
-        autolabel(rects2)
+        # Label bars
+        for rect in rects1 + rects2:
+            height = rect.get_height()
+            ax.annotate(f"{height:.1f}",
+                        xy=(rect.get_x() + rect.get_width()/2, height),
+                        xytext=(0,3), textcoords="offset points",
+                        ha="center", va="bottom")
 
         st.pyplot(fig)
+    else:
+        st.error("Please enter a valid UPC or Active Ingredient.")
