@@ -55,6 +55,7 @@ if df.empty:
 # ===============================
 @st.cache_resource
 def train_model(df):
+    # --- Target ---
     y = df["Safe/Not Safe"]
 
     # Ensure at least 2 classes
@@ -67,6 +68,7 @@ def train_model(df):
     le = LabelEncoder()
     y = le.fit_transform(y)
 
+    # --- Features ---
     numeric_cols = [
         "Days Until Expiry",
         "Storage Temperature (C)",
@@ -77,17 +79,16 @@ def train_model(df):
         "Warning Labels Present"
     ]
 
-    # Convert warnings
     if "Warning Labels Present" in df.columns and df["Warning Labels Present"].dtype == "object":
         df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0}).fillna(0)
 
-    # Ensure all numeric columns exist
     for col in numeric_cols:
         if col not in df.columns:
             df[col] = 0.0
 
     X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
 
+    # --- Pipeline ---
     numeric_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
@@ -106,7 +107,7 @@ def train_model(df):
         ("classifier", LogisticRegression(max_iter=1000))
     ])
 
-    # Train-test split safely
+    # --- Train-test split ---
     if len(df) > 2:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42
@@ -114,20 +115,26 @@ def train_model(df):
     else:
         X_train, X_test, y_train, y_test = X, X, y, y
 
-    model.fit(X_train, y_train)
+    try:
+        model.fit(X_train, y_train)
+    except Exception as e:
+        st.error(f"❌ Model training failed: {e}")
+        return None, {}, numeric_cols
 
-    # Evaluate
-    y_pred = model.predict(X_test)
-    metrics = {
-        "Accuracy": accuracy_score(y_test, y_pred),
-        "Precision": precision_score(y_test, y_pred, zero_division=0),
-        "Recall": recall_score(y_test, y_pred, zero_division=0),
-        "F1-score": f1_score(y_test, y_pred, zero_division=0)
-    }
+    # --- Metrics ---
+    try:
+        y_pred = model.predict(X_test)
+        metrics = {
+            "Accuracy": accuracy_score(y_test, y_pred),
+            "Precision": precision_score(y_test, y_pred, zero_division=0),
+            "Recall": recall_score(y_test, y_pred, zero_division=0),
+            "F1-score": f1_score(y_test, y_pred, zero_division=0)
+        }
+    except Exception:
+        metrics = {}
 
     return model, metrics, numeric_cols
 
-model, metrics, numeric_cols = train_model(df)
 
 # ===============================
 # 3. Sidebar Performance Metrics
