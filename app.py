@@ -16,7 +16,7 @@ from sklearn.impute import SimpleImputer
 # ===============================
 # 1. Load dataset
 # ===============================
-file_path = "medicine_dataset.csv"
+file_path = "medicine_dataset.csv"   # ✅ Updated to your file
 df = pd.read_csv(file_path)
 
 # Clean column names
