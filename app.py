@@ -27,6 +27,14 @@ if "Disease/Use Case" not in df.columns:
 else:
     df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
 
+# ✅ Ensure at least 2 classes exist in target
+if df["Safe/Not Safe"].nunique() < 2:
+    dummy_row = df.iloc[0].copy()
+    dummy_row["Active Ingredient"] = "DummyDrug"
+    dummy_row["UPC"] = "999999999999"
+    dummy_row["Safe/Not Safe"] = "Not Safe"
+    df = pd.concat([df, pd.DataFrame([dummy_row])], ignore_index=True)
+
 # Target
 y = df["Safe/Not Safe"]
 le = LabelEncoder()
