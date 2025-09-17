@@ -121,138 +121,131 @@ def is_safe(value, col):
 # 4. Streamlit UI
 # ===============================
 st.title("💊 Medicine Safety Comparator")
-st.write("Compare competitor medicines against your standard dataset.")
 
-# Lookup section
-st.subheader("🔍 Search by UPC or Active Ingredient")
+tab1, tab2, tab3 = st.tabs(["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
 
-col1, col2 = st.columns(2)
-with col1:
-    upc_input = st.text_input("Enter UPC:")
-with col2:
-    ingredient_input = st.text_input("Enter Active Ingredient:")
+# -------------------------------
+# 🧪 Testing
+# -------------------------------
+with tab1:
+    st.subheader("🔍 Search by UPC or Active Ingredient")
 
-# Auto-fill based on UPC/ingredient
-selected_row = None
-if upc_input:
-    match = df[df["UPC"] == upc_input]
-    if not match.empty:
-        selected_row = match.iloc[0]
-        ingredient_input = selected_row["Active Ingredient"]
-        st.success(f"✅ UPC found → Active Ingredient: {ingredient_input}")
-    else:
-        st.error("❌ UPC not found in dataset.")
+    col1, col2 = st.columns(2)
+    with col1:
+        upc_input = st.text_input("Enter UPC:")
+    with col2:
+        ingredient_input = st.text_input("Enter Active Ingredient:")
 
-elif ingredient_input:
-    match = df[df["Active Ingredient"].str.lower() == ingredient_input.lower()]
-    if not match.empty:
-        selected_row = match.iloc[0]
-        upc_input = selected_row["UPC"]
-        st.success(f"✅ Ingredient found → UPC: {upc_input}")
-    else:
-        st.error("❌ Ingredient not found in dataset.")
-
-# Competitor input
-st.subheader("🏭 Competitor Medicine Entry")
-competitor_values = {}
-for col in numeric_cols:
-    competitor_values[col] = st.number_input(f"{col}:", value=0.0)
-
-# ===============================
-# 5. Compare Button
-# ===============================
-if st.button("🔎 Compare"):
-    if selected_row is None:
-        st.error("⚠️ Please enter a valid UPC or Ingredient first.")
-    else:
-        # Build competitor dataframe
-        input_data = {"Active Ingredient": ingredient_input, "Disease/Use Case": "Unknown"}
-        for col in numeric_cols:
-            input_data[col] = competitor_values[col]
-        competitor_df = pd.DataFrame([input_data])
-
-        # Predictions
-        pred = model.predict(competitor_df)[0]
-        result = le.inverse_transform([pred])[0]
-
-        base_values = [selected_row[col] for col in numeric_cols]
-        comp_values = [competitor_values[col] for col in numeric_cols]
-
-        st.success(f"✅ Competitor Prediction: {result}")
-
-        # Bar chart
-        x = np.arange(len(numeric_cols))
-        width = 0.35
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
-        ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
-        ax.set_xticks(x)
-        ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
-        ax.set_title("Medicine Criteria Comparison")
-        ax.legend()
-        st.pyplot(fig)
-
-        # Log usage
-        log_entry = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "UPC": upc_input,
-            "Ingredient": ingredient_input,
-            "Result": result
-        }
-        log_df = pd.DataFrame([log_entry])
-        if not os.path.exists(LOG_FILE):
-            log_df.to_csv(LOG_FILE, index=False)
+    # Auto-fill based on UPC/ingredient
+    selected_row = None
+    if upc_input:
+        match = df[df["UPC"] == upc_input]
+        if not match.empty:
+            selected_row = match.iloc[0]
+            ingredient_input = selected_row["Active Ingredient"]
+            st.success(f"✅ UPC found → Active Ingredient: {ingredient_input}")
         else:
-            log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+            st.error("❌ UPC not found in dataset.")
 
-# ===============================
-# 6. Dashboard
-# ===============================
-st.subheader("📊 Performance Dashboard")
+    elif ingredient_input:
+        match = df[df["Active Ingredient"].str.lower() == ingredient_input.lower()]
+        if not match.empty:
+            selected_row = match.iloc[0]
+            upc_input = selected_row["UPC"]
+            st.success(f"✅ Ingredient found → UPC: {upc_input}")
+        else:
+            st.error("❌ Ingredient not found in dataset.")
 
-if os.path.exists(LOG_FILE):
-    logs = pd.read_csv(LOG_FILE)
+    # Competitor input
+    st.subheader("🏭 Competitor Medicine Entry")
+    competitor_values = {}
+    for col in numeric_cols:
+        competitor_values[col] = st.number_input(f"{col}:", value=0.0)
 
-    # Convert timestamp
-    logs["timestamp"] = pd.to_datetime(logs["timestamp"])
+    if st.button("🔎 Compare"):
+        if selected_row is None:
+            st.error("⚠️ Please enter a valid UPC or Ingredient first.")
+        else:
+            # Build competitor dataframe
+            input_data = {"Active Ingredient": ingredient_input, "Disease/Use Case": "Unknown"}
+            for col in numeric_cols:
+                input_data[col] = competitor_values[col]
+            competitor_df = pd.DataFrame([input_data])
 
-    # Show last 10 comparisons
-    st.write("Recent Usage Logs:")
-    st.dataframe(logs.tail(10))
+            # Predictions
+            pred = model.predict(competitor_df)[0]
+            result = le.inverse_transform([pred])[0]
 
-    # 1️⃣ Overall Safe vs Not Safe
-    st.write("### Safety Prediction Summary")
-    safety_summary = logs["Result"].value_counts()
-    st.bar_chart(safety_summary)
+            base_values = [selected_row[col] for col in numeric_cols]
+            comp_values = [competitor_values[col] for col in numeric_cols]
 
-    # 2️⃣ Trend of Comparisons Over Time
-    st.write("### Daily Usage Trend")
-    daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
-    st.line_chart(daily_trend)
+            st.success(f"✅ Competitor Prediction: {result}")
 
-    # 3️⃣ Top Medicines Checked
-    st.write("### Most Frequently Compared Medicines")
-    top_meds = logs["Ingredient"].value_counts().head(5)
-    st.bar_chart(top_meds)
+            # Bar chart
+            x = np.arange(len(numeric_cols))
+            width = 0.35
+            fig, ax = plt.subplots(figsize=(12, 6))
+            ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
+            ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
+            ax.set_xticks(x)
+            ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
+            ax.set_title("Medicine Criteria Comparison")
+            ax.legend()
+            st.pyplot(fig)
 
-    # 4️⃣ Success Rate of Competitor Medicines
-    st.write("### Competitor Safety Success Rate (%)")
-    success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
-    st.dataframe(success_rate)
+            # Log usage
+            log_entry = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "UPC": upc_input,
+                "Ingredient": ingredient_input,
+                "Result": result
+            }
+            log_df = pd.DataFrame([log_entry])
+            if not os.path.exists(LOG_FILE):
+                log_df.to_csv(LOG_FILE, index=False)
+            else:
+                log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
 
-    # 5️⃣ Heatmap-style Pivot (Date vs Result)
-    st.write("### Comparison Outcomes by Date")
-    pivot = logs.pivot_table(
-        index=logs["timestamp"].dt.date,
-        columns="Result",
-        values="UPC",
-        aggfunc="count"
-    ).fillna(0)
-    st.dataframe(pivot)
+# -------------------------------
+# 📊 Dashboard
+# -------------------------------
+with tab2:
+    st.subheader("📊 Performance Dashboard")
 
-else:
-    st.info("No logs yet. Run some comparisons to see dashboard data.")
+    if os.path.exists(LOG_FILE):
+        logs = pd.read_csv(LOG_FILE)
+        logs["timestamp"] = pd.to_datetime(logs["timestamp"])
 
-   
+        st.write("Recent Usage Logs:")
+        st.dataframe(logs.tail(10))
 
+        st.write("### Safety Prediction Summary")
+        st.bar_chart(logs["Result"].value_counts())
 
+        st.write("### Daily Usage Trend")
+        daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
+        st.line_chart(daily_trend)
+
+        st.write("### Most Frequently Compared Medicines")
+        st.bar_chart(logs["Ingredient"].value_counts().head(5))
+
+        st.write("### Competitor Safety Success Rate (%)")
+        success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
+        st.dataframe(success_rate)
+
+    else:
+        st.info("No logs yet. Run some comparisons to see dashboard data.")
+
+# -------------------------------
+# 📦 Inventory
+# -------------------------------
+with tab3:
+    st.subheader("📦 Medicine Inventory")
+
+    st.write("Browse the dataset currently loaded into the app.")
+    st.dataframe(df)
+
+    st.write("### Dataset Overview")
+    st.write(f"Total Medicines: {len(df)}")
+    st.write("Active Ingredients Distribution:")
+    st.bar_chart(df["Active Ingredient"].value_counts().head(10))
