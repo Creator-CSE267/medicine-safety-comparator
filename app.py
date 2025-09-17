@@ -25,19 +25,34 @@ st.markdown(
     <style>
     .stApp {
         background-image: url("https://cdn.vectorstock.com/i/1000v/42/27/modern-medicine-science-background-vector-21144227.jpg");
-        background-size: cover;
-        background-attachment: fixed;
+        background-size: cover;         /* cover entire screen */
+        background-repeat: no-repeat;   /* no repeating */
+        background-position: center;    /* center the image */
+        background-attachment: fixed;   /* fixed while scrolling */
     }
+
+    /* Make container readable on all screen sizes */
     .block-container {
-        background-color: white;  /* solid instead of transparent */
-        padding: 20px 40px;
-        border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 20px 30px;
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        max-width: 95%;
+        margin: auto;
+    }
+
+    /* Mobile responsive adjustments */
+    @media (max-width: 768px) {
+        .block-container {
+            padding: 15px 20px;
+            font-size: 14px;
+        }
     }
     </style>
     """,
     unsafe_allow_html=True
 )
+
 
 
 # ===============================
