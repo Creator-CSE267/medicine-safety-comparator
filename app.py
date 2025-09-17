@@ -12,9 +12,52 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from datetime import datetime
+from PIL import Image
 
 # ===============================
-# 1. Load dataset
+# Page Design
+# ===============================
+st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
+
+# Background
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-image: url("https://www.transparenttextures.com/patterns/cubes.png");
+        background-size: cover;
+        background-attachment: fixed;
+    }
+    .block-container {
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 20px 40px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ===============================
+# Sidebar Navigation
+# ===============================
+with st.sidebar:
+    # Logo
+    if os.path.exists("logo.png"):
+        logo = Image.open("logo.png")
+        st.image(logo, width=120)
+    st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
+
+    # Menu
+    menu = st.radio("📌 Navigation", ["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
+
+    st.markdown("---")
+    st.write("ℹ️ Version 1.0.0")
+    st.write("© 2025 MedSafe AI")
+
+# ===============================
+# Load dataset
 # ===============================
 DATA_FILE = "medicine_dataset.csv"
 LOG_FILE = "usage_log.csv"
@@ -63,7 +106,7 @@ if df["Warning Labels Present"].dtype == "object":
 X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
 
 # ===============================
-# 2. Train model
+# Train model
 # ===============================
 def train_model(X, y):
     numeric_transformer = Pipeline(steps=[
@@ -93,41 +136,12 @@ def train_model(X, y):
 model = train_model(X, y)
 
 # ===============================
-# 3. Safety rules
+# Pages
 # ===============================
-SAFETY_RULES = {
-    "Days Until Expiry": {"min": 30},
-    "Storage Temperature (C)": {"range": (15, 30)},
-    "Dissolution Rate (%)": {"min": 80},
-    "Disintegration Time (minutes)": {"max": 30},
-    "Impurity Level (%)": {"max": 2},
-    "Assay Purity (%)": {"min": 90},
-    "Warning Labels Present": {"min": 1}
-}
 
-def is_safe(value, col):
-    rule = SAFETY_RULES.get(col, {})
-    if "min" in rule and value < rule["min"]:
-        return False
-    if "max" in rule and value > rule["max"]:
-        return False
-    if "range" in rule:
-        low, high = rule["range"]
-        if not (low <= value <= high):
-            return False
-    return True
-
-# ===============================
-# 4. Streamlit UI
-# ===============================
-st.title("💊 Medicine Safety Comparator")
-
-tab1, tab2, tab3 = st.tabs(["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
-
-# -------------------------------
-# 🧪 Testing
-# -------------------------------
-with tab1:
+# --- 🧪 Testing Page ---
+if menu == "🧪 Testing":
+    st.header("🧪 Medicine Safety Testing")
     st.subheader("🔍 Search by UPC or Active Ingredient")
 
     col1, col2 = st.columns(2)
@@ -136,7 +150,6 @@ with tab1:
     with col2:
         ingredient_input = st.text_input("Enter Active Ingredient:")
 
-    # Auto-fill based on UPC/ingredient
     selected_row = None
     if upc_input:
         match = df[df["UPC"] == upc_input]
@@ -146,7 +159,6 @@ with tab1:
             st.success(f"✅ UPC found → Active Ingredient: {ingredient_input}")
         else:
             st.error("❌ UPC not found in dataset.")
-
     elif ingredient_input:
         match = df[df["Active Ingredient"].str.lower() == ingredient_input.lower()]
         if not match.empty:
@@ -156,7 +168,6 @@ with tab1:
         else:
             st.error("❌ Ingredient not found in dataset.")
 
-    # Competitor input
     st.subheader("🏭 Competitor Medicine Entry")
     competitor_values = {}
     for col in numeric_cols:
@@ -166,13 +177,11 @@ with tab1:
         if selected_row is None:
             st.error("⚠️ Please enter a valid UPC or Ingredient first.")
         else:
-            # Build competitor dataframe
             input_data = {"Active Ingredient": ingredient_input, "Disease/Use Case": "Unknown"}
             for col in numeric_cols:
                 input_data[col] = competitor_values[col]
             competitor_df = pd.DataFrame([input_data])
 
-            # Predictions
             pred = model.predict(competitor_df)[0]
             result = le.inverse_transform([pred])[0]
 
@@ -181,7 +190,7 @@ with tab1:
 
             st.success(f"✅ Competitor Prediction: {result}")
 
-            # Bar chart
+            # Comparison chart
             x = np.arange(len(numeric_cols))
             width = 0.35
             fig, ax = plt.subplots(figsize=(12, 6))
@@ -193,7 +202,7 @@ with tab1:
             ax.legend()
             st.pyplot(fig)
 
-            # Log usage
+            # Log
             log_entry = {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "UPC": upc_input,
@@ -206,41 +215,36 @@ with tab1:
             else:
                 log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
 
-# -------------------------------
-# 📊 Dashboard
-# -------------------------------
-with tab2:
-    st.subheader("📊 Performance Dashboard")
+# --- 📊 Dashboard Page ---
+elif menu == "📊 Dashboard":
+    st.header("📊 Performance Dashboard")
 
     if os.path.exists(LOG_FILE):
         logs = pd.read_csv(LOG_FILE)
         logs["timestamp"] = pd.to_datetime(logs["timestamp"])
 
-        st.write("Recent Usage Logs:")
+        st.subheader("Recent Usage Logs")
         st.dataframe(logs.tail(10))
 
-        st.write("### Safety Prediction Summary")
+        st.subheader("Safety Prediction Summary")
         st.bar_chart(logs["Result"].value_counts())
 
-        st.write("### Daily Usage Trend")
+        st.subheader("Daily Usage Trend")
         daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
         st.line_chart(daily_trend)
 
-        st.write("### Most Frequently Compared Medicines")
+        st.subheader("Most Frequently Compared Medicines")
         st.bar_chart(logs["Ingredient"].value_counts().head(5))
 
-        st.write("### Competitor Safety Success Rate (%)")
+        st.subheader("Competitor Safety Success Rate (%)")
         success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
         st.dataframe(success_rate)
-
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
 
-# -------------------------------
-# 📦 Inventory
-# -------------------------------
-with tab3:
-    st.subheader("📦 Medicine Inventory")
+# --- 📦 Inventory Page ---
+elif menu == "📦 Inventory":
+    st.header("📦 Medicine Inventory")
 
     st.write("Browse the dataset currently loaded into the app.")
     st.dataframe(df)
