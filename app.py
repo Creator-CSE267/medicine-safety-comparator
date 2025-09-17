@@ -22,7 +22,7 @@ st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", la
 # Background
 import base64
 
-def set_background(bg4.jpg):
+def set_background(bg4):
     with open(image_file, "rb") as f:
         data = f.read()
     encoded = base64.b64encode(data).decode()
