@@ -214,6 +214,8 @@ if os.path.exists(LOG_FILE):
     logs = pd.read_csv(LOG_FILE)
     st.write("Recent Usage Logs:", logs.tail(10))
 
-    st.line_chart(logs["Result"].value_counts())
+    summary = logs["Result"].value_counts()
+    st.bar_chart(summary)
 else:
     st.info("No logs yet. Run some comparisons to see dashboard data.")
+
