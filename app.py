@@ -20,48 +20,49 @@ from PIL import Image
 st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
 
 # Background
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background-image: url("bg1.jpg");
-        background-size: cover;         
-        background-repeat: no-repeat;   
-        background-position: center;    
-        background-attachment: fixed;   
-        color: #FFFFFF; /* white text by default */
-    }
+import base64
 
-    /* Remove default white background block */
-    .block-container {
-        background: transparent !important;
-        padding: 20px 30px;
-    }
+def set_background(bg4.jpg):
+    with open(image_file, "rb") as f:
+        data = f.read()
+    encoded = base64.b64encode(data).decode()
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/jpg;base64,{encoded}");
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-attachment: fixed;
+            color: #FFFFFF;
+        }}
+        .block-container {{
+            background: transparent !important;
+            padding: 20px 30px;
+        }}
+        .stMarkdown, .stText, .stHeader, .stSubheader, .stTitle {{
+            color: white !important;
+        }}
+        .stTextInput > div > div > input, 
+        .stNumberInput input,
+        .stSelectbox > div > div {{
+            background: rgba(255,255,255,0.8) !important;
+            color: #000000 !important;
+            border-radius: 8px;
+        }}
+        .stButton > button {{
+            background-color: #2E86C1;
+            color: #FFFFFF;
+            border-radius: 8px;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
-    /* Style for text elements over background */
-    .stMarkdown, .stText, .stHeader, .stSubheader, .stTitle {
-        color: white !important;
-    }
-
-    /* Inputs styled so they’re visible */
-    .stTextInput > div > div > input, 
-    .stNumberInput input,
-    .stSelectbox > div > div {
-        background: rgba(255,255,255,0.8) !important;
-        color: #000000 !important;
-        border-radius: 8px;
-    }
-
-    /* Buttons style */
-    .stButton > button {
-        background-color: #2E86C1;
-        color: #FFFFFF;
-        border-radius: 8px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# Call it at the top of your app
+set_background("bg1.jpg")
 
 
 
