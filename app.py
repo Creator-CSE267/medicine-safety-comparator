@@ -24,7 +24,7 @@ st.markdown(
     """
     <style>
     .stApp {
-        background-image: url("modern-medicine-science-background-vector-21144227.jpg");
+        background-image: url("bg1.jpg");
         background-size: cover;         
         background-repeat: no-repeat;   
         background-position: center;    
