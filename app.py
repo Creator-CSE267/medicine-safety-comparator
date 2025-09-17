@@ -208,10 +208,6 @@ if st.button("🔎 Compare"):
 # ===============================
 # 6. Dashboard
 # ===============================
-# ===============================
-# ===============================
-# 6. Dashboard
-# ===============================
 st.subheader("📊 Performance Dashboard")
 
 if os.path.exists(LOG_FILE):
@@ -246,14 +242,17 @@ if os.path.exists(LOG_FILE):
 
     # 5️⃣ Heatmap-style Pivot (Date vs Result)
     st.write("### Comparison Outcomes by Date")
-    pivot = logs.pivot_table(index=logs["timestamp"].dt.date, 
-                             columns="Result", 
-                             values="UPC", 
-                             aggfunc="count").fillna(0)
+    pivot = logs.pivot_table(
+        index=logs["timestamp"].dt.date,
+        columns="Result",
+        values="UPC",
+        aggfunc="count"
+    ).fillna(0)
     st.dataframe(pivot)
 
 else:
     st.info("No logs yet. Run some comparisons to see dashboard data.")
-)
+
+   
 
 
