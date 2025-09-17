@@ -24,29 +24,39 @@ st.markdown(
     """
     <style>
     .stApp {
-        background-image: url("https://cdn.vectorstock.com/i/1000v/42/27/modern-medicine-science-background-vector-21144227.jpg");
-        background-size: cover;         /* cover entire screen */
-        background-repeat: no-repeat;   /* no repeating */
-        background-position: center;    /* center the image */
-        background-attachment: fixed;   /* fixed while scrolling */
+        background-image: url("modern-medicine-science-background-vector-21144227.jpg");
+        background-size: cover;         
+        background-repeat: no-repeat;   
+        background-position: center;    
+        background-attachment: fixed;   
+        color: #FFFFFF; /* white text by default */
     }
 
-    /* Make container readable on all screen sizes */
+    /* Remove default white background block */
     .block-container {
-        background-color: rgba(255, 255, 255, 0.9);
+        background: transparent !important;
         padding: 20px 30px;
-        border-radius: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        max-width: 95%;
-        margin: auto;
     }
 
-    /* Mobile responsive adjustments */
-    @media (max-width: 768px) {
-        .block-container {
-            padding: 15px 20px;
-            font-size: 14px;
-        }
+    /* Style for text elements over background */
+    .stMarkdown, .stText, .stHeader, .stSubheader, .stTitle {
+        color: white !important;
+    }
+
+    /* Inputs styled so they’re visible */
+    .stTextInput > div > div > input, 
+    .stNumberInput input,
+    .stSelectbox > div > div {
+        background: rgba(255,255,255,0.8) !important;
+        color: #000000 !important;
+        border-radius: 8px;
+    }
+
+    /* Buttons style */
+    .stButton > button {
+        background-color: #2E86C1;
+        color: #FFFFFF;
+        border-radius: 8px;
     }
     </style>
     """,
