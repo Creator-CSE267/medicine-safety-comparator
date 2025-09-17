@@ -24,7 +24,7 @@ st.markdown(
     """
     <style>
     .stApp {
-        background-image: url("https://www.transparenttextures.com/patterns/cubes.png");
+        background-image: url("https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR3Fr_xhu2yJVfB7ucrjLJnD8ZukUyZRRuJGA&s");
         background-size: cover;
         background-attachment: fixed;
     }
