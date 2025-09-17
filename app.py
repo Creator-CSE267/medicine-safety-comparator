@@ -209,6 +209,7 @@ if st.button("🔎 Compare"):
 # 6. Dashboard
 # ===============================
 # ===============================
+# ===============================
 # 6. Dashboard
 # ===============================
 st.subheader("📊 Performance Dashboard")
@@ -216,22 +217,43 @@ st.subheader("📊 Performance Dashboard")
 if os.path.exists(LOG_FILE):
     logs = pd.read_csv(LOG_FILE)
 
+    # Convert timestamp
+    logs["timestamp"] = pd.to_datetime(logs["timestamp"])
+
     # Show last 10 comparisons
     st.write("Recent Usage Logs:")
     st.dataframe(logs.tail(10))
 
-    # ✅ Count of Safe vs Not Safe
+    # 1️⃣ Overall Safe vs Not Safe
     st.write("### Safety Prediction Summary")
-    summary = logs["Result"].value_counts()
-    st.bar_chart(summary)
+    safety_summary = logs["Result"].value_counts()
+    st.bar_chart(safety_summary)
 
-    # ✅ Trend over time
+    # 2️⃣ Trend of Comparisons Over Time
     st.write("### Daily Usage Trend")
-    logs["timestamp"] = pd.to_datetime(logs["timestamp"])
     daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
     st.line_chart(daily_trend)
 
+    # 3️⃣ Top Medicines Checked
+    st.write("### Most Frequently Compared Medicines")
+    top_meds = logs["Ingredient"].value_counts().head(5)
+    st.bar_chart(top_meds)
+
+    # 4️⃣ Success Rate of Competitor Medicines
+    st.write("### Competitor Safety Success Rate (%)")
+    success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
+    st.dataframe(success_rate)
+
+    # 5️⃣ Heatmap-style Pivot (Date vs Result)
+    st.write("### Comparison Outcomes by Date")
+    pivot = logs.pivot_table(index=logs["timestamp"].dt.date, 
+                             columns="Result", 
+                             values="UPC", 
+                             aggfunc="count").fillna(0)
+    st.dataframe(pivot)
+
 else:
     st.info("No logs yet. Run some comparisons to see dashboard data.")
+)
 
 
