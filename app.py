@@ -208,14 +208,30 @@ if st.button("🔎 Compare"):
 # ===============================
 # 6. Dashboard
 # ===============================
+# ===============================
+# 6. Dashboard
+# ===============================
 st.subheader("📊 Performance Dashboard")
 
 if os.path.exists(LOG_FILE):
     logs = pd.read_csv(LOG_FILE)
-    st.write("Recent Usage Logs:", logs.tail(10))
 
+    # Show last 10 comparisons
+    st.write("Recent Usage Logs:")
+    st.dataframe(logs.tail(10))
+
+    # ✅ Count of Safe vs Not Safe
+    st.write("### Safety Prediction Summary")
     summary = logs["Result"].value_counts()
     st.bar_chart(summary)
+
+    # ✅ Trend over time
+    st.write("### Daily Usage Trend")
+    logs["timestamp"] = pd.to_datetime(logs["timestamp"])
+    daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
+    st.line_chart(daily_trend)
+
 else:
     st.info("No logs yet. Run some comparisons to see dashboard data.")
+
 
