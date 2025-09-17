@@ -24,12 +24,12 @@ st.markdown(
     """
     <style>
     .stApp {
-        background-image: url("https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR3Fr_xhu2yJVfB7ucrjLJnD8ZukUyZRRuJGA&s");
+        background-image: url("https://cdn.vectorstock.com/i/1000v/42/27/modern-medicine-science-background-vector-21144227.jpg");
         background-size: cover;
         background-attachment: fixed;
     }
     .block-container {
-        background-color: rgba(255, 255, 255, 0.9);
+        background-color: white;  /* solid instead of transparent */
         padding: 20px 40px;
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
@@ -38,6 +38,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 # ===============================
 # Sidebar Navigation
