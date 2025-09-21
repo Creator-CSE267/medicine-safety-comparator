@@ -224,23 +224,9 @@ if menu == "🧪 Testing":
     comp_address = st.text_area("Address")
     comp_phone = st.text_input("Phone Number")
 
-    # 2-column numeric inputs with min/max & tooltips
-    col1, col2 = st.columns(2)
     competitor_values = {}
-    for i, col_name in enumerate(numeric_cols):
-        rule = SAFETY_RULES.get(col_name, {})
-        min_val = rule.get("min", 0.0)
-        max_val = rule.get("max", 10000.0)
-        if "range" in rule:
-            min_val, max_val = rule["range"]
-        input_col = col1 if i % 2 == 0 else col2
-        competitor_values[col_name] = input_col.number_input(
-            f"{col_name}:",
-            min_value=float(min_val)*0.5,
-            max_value=float(max_val)*1.5,
-            value=float(min_val),
-            help=f"Expected safe range: {min_val} - {max_val}"
-        )
+    for col in numeric_cols:
+        competitor_values[col] = st.number_input(f"{col}:", value=0.0)
 
     if st.button("🔎 Compare"):
         if selected_row is None:
@@ -263,35 +249,12 @@ if menu == "🧪 Testing":
             st.markdown(f"**🏭 Competitor:** {comp_name} | **GST:** {comp_gst} | **Phone:** {comp_phone}")
             st.markdown(f"**📍 Address:** {comp_address}")
 
-            # Comparison chart with color-coded bars + pass/fail markers
+            # Comparison chart
             x = np.arange(len(numeric_cols))
             width = 0.35
             fig, ax = plt.subplots(figsize=(12, 6))
-            comp_colors = []
-            pass_fail_labels = []
-
-            for col_name in numeric_cols:
-                val = competitor_values[col_name]
-                rule = SAFETY_RULES.get(col_name, {})
-                safe = True
-                if "min" in rule and val < rule["min"]:
-                    safe = False
-                if "max" in rule and val > rule["max"]:
-                    safe = False
-                if "range" in rule:
-                    low, high = rule["range"]
-                    if not (low <= val <= high):
-                        safe = False
-                comp_colors.append("green" if safe else "red")
-                pass_fail_labels.append("✔️" if safe else "❌")
-
             ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
-            bars = ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color=comp_colors)
-            for bar, label in zip(bars, pass_fail_labels):
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2, height + 0.5, label,
-                        ha='center', va='bottom', fontsize=12, fontweight='bold')
-
+            ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
             ax.set_xticks(x)
             ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
             ax.set_title("Medicine Criteria Comparison")
@@ -315,9 +278,6 @@ if menu == "🧪 Testing":
                 "Competitor": comp_name,
                 "Result": result
             }
-            for col in numeric_cols:
-                log_entry[col] = competitor_values[col]
-
             log_df = pd.DataFrame([log_entry])
             if not os.path.exists(LOG_FILE):
                 log_df.to_csv(LOG_FILE, index=False)
@@ -348,58 +308,13 @@ elif menu == "📊 Dashboard":
         st.subheader("Competitor Safety Success Rate (%)")
         success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
         st.dataframe(success_rate)
-
-        # Criterion-Level Summary
-        st.subheader("📌 Criterion-Level Safety Summary")
-        numeric_in_logs = [col for col in numeric_cols if col in logs.columns]
-        if numeric_in_logs:
-            criterion_summary = {}
-            for col_name in numeric_in_logs:
-                rule = SAFETY_RULES.get(col_name, {})
-                pass_count = 0
-                total_count = len(logs)
-                for val in logs[col_name]:
-                    safe = True
-                    if "min" in rule and val < rule["min"]:
-                        safe = False
-                    if "max" in rule and val > rule["max"]:
-                        safe = False
-                    if "range" in rule:
-                        low, high = rule["range"]
-                        if not (low <= val <= high):
-                            safe = False
-                    if safe:
-                        pass_count += 1
-                criterion_summary[col_name] = round((pass_count / total_count) * 100, 2)
-
-            criterion_df = pd.DataFrame.from_dict(criterion_summary, orient="index", columns=["Pass Rate (%)"])
-            st.dataframe(criterion_df)
-
-            # Color-coded bar chart
-            def color_map(val):
-                if val >= 80:
-                    return "green"
-                elif val >= 50:
-                    return "yellow"
-                else:
-                    return "red"
-
-            fig, ax = plt.subplots(figsize=(12, 6))
-            colors = [color_map(v) for v in criterion_df["Pass Rate (%)"]]
-            ax.bar(criterion_df.index, criterion_df["Pass Rate (%)"], color=colors)
-            ax.set_ylim(0, 100)
-            ax.set_ylabel("Pass Rate (%)")
-            ax.set_title("Criterion-Level Pass Rate for Competitor Medicines")
-            ax.set_xticklabels(criterion_df.index, rotation=30, ha="right")
-            st.pyplot(fig)
-        else:
-            st.info("No numeric data found in logs for criterion-level analysis.")
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
 
 # --- 📦 Inventory Page ---
 elif menu == "📦 Inventory":
     st.header("📦 Medicine Inventory")
+
     st.write("Browse the dataset currently loaded into the app.")
     st.dataframe(df)
 
