@@ -46,7 +46,7 @@ def set_background(image_file):
     )
 
 # Example call
-set_background("bg3.jpg")
+set_background("bg4.jpg")
 
 
 
