@@ -19,9 +19,7 @@ from PIL import Image
 # ===============================
 st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
 
-# Background
-import base64
-
+# --- Background ---
 def set_background(image_file):
     import base64
     with open(image_file, "rb") as f:
@@ -45,23 +43,36 @@ def set_background(image_file):
         unsafe_allow_html=True
     )
 
-# Example call
+# Example background
 set_background("bg4.jpg")
 
+# --- Logo Centered ---
+if os.path.exists("logo.png"):
+    st.markdown(
+        """
+        <style>
+        .logo-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        .logo-container img {
+            width: 180px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    st.markdown('<div class="logo-container"><img src="logo.png"></div>', unsafe_allow_html=True)
 
-
+st.title("💊 Medicine Safety Comparator")
 
 # ===============================
 # Sidebar Navigation
 # ===============================
 with st.sidebar:
-    # Logo
-    if os.path.exists("logo.png"):
-        logo = Image.open("logo.png")
-        st.image(logo, width=120)
     st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
 
-    # Menu
     menu = st.radio("📌 Navigation", ["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
 
     st.markdown("---")
@@ -84,7 +95,6 @@ if "Disease/Use Case" not in df.columns:
 else:
     df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
 
-# Target
 if "Safe/Not Safe" not in df.columns:
     df["Safe/Not Safe"] = "Safe"
 
@@ -148,6 +158,34 @@ def train_model(X, y):
 model = train_model(X, y)
 
 # ===============================
+# Safety Rules
+# ===============================
+SAFETY_RULES = {
+    "Days Until Expiry": {"min": 30},
+    "Storage Temperature (C)": {"range": (15, 30)},
+    "Dissolution Rate (%)": {"min": 80},
+    "Disintegration Time (minutes)": {"max": 30},
+    "Impurity Level (%)": {"max": 2},
+    "Assay Purity (%)": {"min": 90},
+    "Warning Labels Present": {"min": 1}
+}
+
+def suggest_improvements(values):
+    """Check competitor values against safety rules and suggest fixes."""
+    suggestions = []
+    for col, val in values.items():
+        rule = SAFETY_RULES.get(col, {})
+        if "min" in rule and val < rule["min"]:
+            suggestions.append(f"Increase **{col}** (min {rule['min']}).")
+        if "max" in rule and val > rule["max"]:
+            suggestions.append(f"Reduce **{col}** (max {rule['max']}).")
+        if "range" in rule:
+            low, high = rule["range"]
+            if not (low <= val <= high):
+                suggestions.append(f"Keep **{col}** within {low}-{high}.")
+    return suggestions
+
+# ===============================
 # Pages
 # ===============================
 
@@ -181,6 +219,11 @@ if menu == "🧪 Testing":
             st.error("❌ Ingredient not found in dataset.")
 
     st.subheader("🏭 Competitor Medicine Entry")
+    comp_name = st.text_input("Competitor Name")
+    comp_gst = st.text_input("GST Number")
+    comp_address = st.text_area("Address")
+    comp_phone = st.text_input("Phone Number")
+
     competitor_values = {}
     for col in numeric_cols:
         competitor_values[col] = st.number_input(f"{col}:", value=0.0)
@@ -202,6 +245,10 @@ if menu == "🧪 Testing":
 
             st.success(f"✅ Competitor Prediction: {result}")
 
+            # Show competitor details
+            st.markdown(f"**🏭 Competitor:** {comp_name} | **GST:** {comp_gst} | **Phone:** {comp_phone}")
+            st.markdown(f"**📍 Address:** {comp_address}")
+
             # Comparison chart
             x = np.arange(len(numeric_cols))
             width = 0.35
@@ -214,11 +261,21 @@ if menu == "🧪 Testing":
             ax.legend()
             st.pyplot(fig)
 
+            # Suggestions if unsafe
+            if result.lower() == "not safe":
+                st.error("⚠️ Competitor medicine is NOT SAFE.")
+                suggestions = suggest_improvements(competitor_values)
+                if suggestions:
+                    st.markdown("### 🔧 Suggested Improvements")
+                    for s in suggestions:
+                        st.write(f"- {s}")
+
             # Log
             log_entry = {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "UPC": upc_input,
                 "Ingredient": ingredient_input,
+                "Competitor": comp_name,
                 "Result": result
             }
             log_df = pd.DataFrame([log_entry])
