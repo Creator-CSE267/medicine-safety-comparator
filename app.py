@@ -22,10 +22,10 @@ st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", la
 # Background
 import base64
 
-def set_background(https://github.com/Creator-CSE267/medicine-safety-comparator/blob/main/bg3.jpg?raw=true):
+def set_background(image_file):
+    import base64
     with open(image_file, "rb") as f:
-        data = f.read()
-    encoded = base64.b64encode(data).decode()
+        encoded = base64.b64encode(f.read()).decode()
     st.markdown(
         f"""
         <style>
@@ -39,30 +39,15 @@ def set_background(https://github.com/Creator-CSE267/medicine-safety-comparator/
         }}
         .block-container {{
             background: transparent !important;
-            padding: 20px 30px;
-        }}
-        .stMarkdown, .stText, .stHeader, .stSubheader, .stTitle {{
-            color: white !important;
-        }}
-        .stTextInput > div > div > input, 
-        .stNumberInput input,
-        .stSelectbox > div > div {{
-            background: rgba(255,255,255,0.8) !important;
-            color: #000000 !important;
-            border-radius: 8px;
-        }}
-        .stButton > button {{
-            background-color: #2E86C1;
-            color: #FFFFFF;
-            border-radius: 8px;
         }}
         </style>
         """,
         unsafe_allow_html=True
     )
 
-# Call it at the top of your app
-set_background("bg1.jpg")
+# Example call
+set_background("bg3.jpg")
+
 
 
 
