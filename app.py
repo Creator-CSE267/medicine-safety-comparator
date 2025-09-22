@@ -289,6 +289,7 @@ if menu == "🧪 Testing":
                 log_df.to_csv(LOG_FILE, index=False)
             else:
                 log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+
             # --- PDF Report Download ---
             if result:
                 if st.button("📄 Download Report as PDF"):
@@ -359,13 +360,6 @@ if menu == "🧪 Testing":
                         file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                         mime="application/pdf"
                     )
-                    with open("report.pdf", "rb") as pdf_file:
-    st.download_button(
-        label="⬇️ Download Report",
-        data=pdf_file,
-        file_name="medicine_report.pdf",
-        mime="application/pdf"
-    )
 
 
 # --- 📊 Dashboard Page ---
