@@ -458,8 +458,11 @@ if menu == "🧪 Testing":
             )
 
 # --- 📊 Dashboard Page ---
+from style import apply_global_css
+
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
+    apply_global_css()   # ✅ apply styling
     st.markdown("<div class='main-title'>📊 Medicine Safety Analytics Dashboard</div>", unsafe_allow_html=True)
 
     if os.path.exists(LOG_FILE):
@@ -475,87 +478,65 @@ elif menu == "📊 Dashboard":
                 most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
 
                 st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
-                with st.container():
-                    st.markdown("<div class='card'>", unsafe_allow_html=True)
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("🧪 Total Tests", total_tests)
-                    col2.metric("✅ Safe", safe_count)
-                    col3.metric("⚠️ Unsafe", unsafe_count)
-                    col4.metric("🔥 Most Common Ingredient", most_common_ing)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("🧪 Total Tests", total_tests)
+                col2.metric("✅ Safe", safe_count)
+                col3.metric("⚠️ Unsafe", unsafe_count)
+                col4.metric("🔥 Most Common Ingredient", most_common_ing)
 
                 # --- Competitor Safety Gauge ---
                 st.markdown("<div class='section-header'>📊 Competitor Safety Rate</div>", unsafe_allow_html=True)
-                with st.container():
-                    st.markdown("<div class='card'>", unsafe_allow_html=True)
-                    safety_rate = (safe_count / total_tests * 100) if total_tests > 0 else 0
-
-                    fig_gauge = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=safety_rate,
-                        title={"text": "Safety %"},
-                        gauge={
-                            "axis": {"range": [0, 100]},
-                            "bar": {"color": "green"},
-                            "steps": [
-                                {"range": [0, 40], "color": "red"},
-                                {"range": [40, 70], "color": "orange"},
-                                {"range": [70, 100], "color": "lightgreen"}
-                            ],
-                            "threshold": {
-                                "line": {"color": "black", "width": 4},
-                                "thickness": 0.75,
-                                "value": safety_rate
-                            }
+                safety_rate = (safe_count / total_tests * 100) if total_tests > 0 else 0
+                fig_gauge = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=safety_rate,
+                    title={"text": "Safety %"},
+                    gauge={
+                        "axis": {"range": [0, 100]},
+                        "bar": {"color": "green"},
+                        "steps": [
+                            {"range": [0, 40], "color": "red"},
+                            {"range": [40, 70], "color": "orange"},
+                            {"range": [70, 100], "color": "lightgreen"}
+                        ],
+                        "threshold": {
+                            "line": {"color": "black", "width": 4},
+                            "thickness": 0.75,
+                            "value": safety_rate
                         }
-                    ))
-                    st.plotly_chart(fig_gauge, use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    }
+                ))
+                st.plotly_chart(fig_gauge, use_container_width=True)
 
                 # --- Trend Over Time ---
                 st.markdown("<div class='section-header'>📈 Daily Usage Trend</div>", unsafe_allow_html=True)
-                with st.container():
-                    st.markdown("<div class='card'>", unsafe_allow_html=True)
-                    daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
-                    fig_trend = px.line(daily_trend, x="timestamp", y="count", markers=True, title="Tests Over Time")
-                    st.plotly_chart(fig_trend, use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
+                fig_trend = px.line(daily_trend, x="timestamp", y="count", markers=True, title="Tests Over Time")
+                st.plotly_chart(fig_trend, use_container_width=True)
 
                 # --- Safe vs Unsafe Pie ---
                 st.markdown("<div class='section-header'>🟢 Safe vs 🔴 Unsafe Distribution</div>", unsafe_allow_html=True)
-                with st.container():
-                    st.markdown("<div class='card'>", unsafe_allow_html=True)
-                    result_counts = logs["Result"].value_counts()
-                    fig_pie = px.pie(values=result_counts.values, names=result_counts.index, hole=0.4)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                result_counts = logs["Result"].value_counts()
+                fig_pie = px.pie(values=result_counts.values, names=result_counts.index, hole=0.4)
+                st.plotly_chart(fig_pie, use_container_width=True)
 
                 # --- Top Competitors ---
                 if "Competitor" in logs.columns:
                     st.markdown("<div class='section-header'>🏭 Top 5 Compared Competitors</div>", unsafe_allow_html=True)
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        top_comp = logs["Competitor"].value_counts().head(5).reset_index()
-                        top_comp.columns = ["Competitor", "Count"]
-                        fig_bar = px.bar(top_comp, x="Competitor", y="Count", text="Count")
-                        st.plotly_chart(fig_bar, use_container_width=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    top_comp = logs["Competitor"].value_counts().head(5).reset_index()
+                    top_comp.columns = ["Competitor", "Count"]
+                    fig_bar = px.bar(top_comp, x="Competitor", y="Count", text="Count")
+                    st.plotly_chart(fig_bar, use_container_width=True)
 
                 # --- Recent Logs ---
                 st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
-                with st.container():
-                    st.markdown("<div class='card'>", unsafe_allow_html=True)
-                    st.dataframe(logs.tail(10), use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                st.dataframe(logs.tail(10), use_container_width=True)
 
                 # --- Clear Logs Button ---
                 st.markdown("<div class='section-header'>🗑️ Manage Logs</div>", unsafe_allow_html=True)
-                with st.container():
-                    st.markdown("<div class='card'>", unsafe_allow_html=True)
-                    if st.button("🗑️ Clear Logs"):
-                        os.remove(LOG_FILE)
-                        st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
-                    st.markdown("</div>", unsafe_allow_html=True)
+                if st.button("🗑️ Clear Logs"):
+                    os.remove(LOG_FILE)
+                    st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
 
             else:
                 st.info("No data in logs yet. Run some comparisons first.")
