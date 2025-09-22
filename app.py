@@ -21,7 +21,7 @@ from reportlab.lib.pagesizes import A4
 import io
 import streamlit as st
 from styles import apply_theme, apply_layout_styles
-from styles import apply_global_css
+
 
 apply_theme()
 apply_layout_styles()
