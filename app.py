@@ -21,6 +21,7 @@ from reportlab.lib.pagesizes import A4
 import io
 import streamlit as st
 from style import apply_theme, apply_layout_styles
+from style import apply_global_css
 
 apply_theme()
 apply_layout_styles()
@@ -460,9 +461,6 @@ if menu == "🧪 Testing":
                 file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                 mime="application/pdf"
             )
-
-# --- 📊 Dashboard Page ---
-from style import apply_global_css
 
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
