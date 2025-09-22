@@ -395,14 +395,14 @@ elif menu == "📦 Inventory":
 
     # Ensure inventory file exists
     if not os.path.exists(INVENTORY_FILE):
-        pd.DataFrame(columns=["Medicine", "Stock", "Expiry"]).to_csv(INVENTORY_FILE, index=False)
+        pd.DataFrame(columns=["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"]).to_csv(INVENTORY_FILE, index=False)
 
     try:
         inventory = pd.read_csv(INVENTORY_FILE)
 
         # --- KPI Cards ---
         if not inventory.empty:
-            total_meds = inventory["Medicine"].nunique()
+            total_meds = inventory["Ingredient"].nunique()
             total_stock = inventory["Stock"].sum()
             expiring_soon = inventory[
                 pd.to_datetime(inventory["Expiry"], errors="coerce") <= pd.Timestamp.today() + pd.Timedelta(days=30)
@@ -411,30 +411,56 @@ elif menu == "📦 Inventory":
 
             st.markdown("<div class='section-header'>📊 Inventory Overview</div>", unsafe_allow_html=True)
             col1, col2, col3 = st.columns(3)
-            col1.metric("💊 Total Medicines", total_meds)
+            col1.metric("💊 Unique Medicines", total_meds)
             col2.metric("📦 Total Stock", total_stock)
             col3.metric("⏳ Expiring Soon", expiring_count)
 
-        # --- Add Medicine ---
-        st.markdown("<div class='section-header'>➕ Add Medicine</div>", unsafe_allow_html=True)
+        # --- Add / Update Medicine ---
+        st.markdown("<div class='section-header'>➕ Add or Update Medicine</div>", unsafe_allow_html=True)
         with st.form("add_medicine_form", clear_on_submit=True):
             col1, col2, col3 = st.columns(3)
             with col1:
-                med_name = st.text_input("Medicine Name")
+                upc = st.text_input("UPC (Unique Product Code)")
             with col2:
-                stock = st.number_input("Stock Quantity", min_value=1, step=1)
+                ingredient = st.text_input("Active Ingredient")
             with col3:
+                manufacturer = st.text_input("Manufacturer")
+
+            col4, col5, col6 = st.columns(3)
+            with col4:
+                batch = st.text_input("Batch Number")
+            with col5:
+                stock = st.number_input("Stock Quantity", min_value=1, step=1)
+            with col6:
                 expiry = st.date_input("Expiry Date")
 
-            submitted = st.form_submit_button("➕ Add Medicine")
+            submitted = st.form_submit_button("💾 Save Medicine")
             if submitted:
-                if med_name.strip():
-                    new_entry = pd.DataFrame([[med_name, stock, expiry]], columns=["Medicine", "Stock", "Expiry"])
-                    inventory = pd.concat([inventory, new_entry], ignore_index=True)
+                if ingredient.strip():
+                    # Check if medicine (UPC+Manufacturer+Batch) exists → update stock
+                    mask = (
+                        (inventory["UPC"] == upc) &
+                        (inventory["Manufacturer"] == manufacturer) &
+                        (inventory["Batch"] == batch)
+                    )
+                    if mask.any():
+                        inventory.loc[mask, "Stock"] += stock
+                        st.success(f"✅ Stock updated for {ingredient} (UPC: {upc}, Batch: {batch})")
+                    else:
+                        new_entry = pd.DataFrame([{
+                            "UPC": upc,
+                            "Ingredient": ingredient,
+                            "Manufacturer": manufacturer,
+                            "Batch": batch,
+                            "Stock": stock,
+                            "Expiry": expiry
+                        }])
+                        inventory = pd.concat([inventory, new_entry], ignore_index=True)
+                        st.success(f"✅ {ingredient} added successfully!")
+
                     inventory.to_csv(INVENTORY_FILE, index=False)
-                    st.success(f"✅ {med_name} added successfully!")
                 else:
-                    st.warning("⚠️ Please enter a valid medicine name.")
+                    st.warning("⚠️ Please enter a valid Active Ingredient.")
 
         # --- View Inventory ---
         st.markdown("<div class='section-header'>📋 Current Inventory</div>", unsafe_allow_html=True)
@@ -446,9 +472,9 @@ elif menu == "📦 Inventory":
         # --- Remove Medicine ---
         st.markdown("<div class='section-header'>🗑️ Remove Medicine</div>", unsafe_allow_html=True)
         if not inventory.empty:
-            med_to_remove = st.selectbox("Select Medicine to Remove", inventory["Medicine"].unique())
+            med_to_remove = st.selectbox("Select Medicine to Remove", inventory["Ingredient"].unique())
             if st.button("🗑️ Remove Selected"):
-                inventory = inventory[inventory["Medicine"] != med_to_remove]
+                inventory = inventory[inventory["Ingredient"] != med_to_remove]
                 inventory.to_csv(INVENTORY_FILE, index=False)
                 st.success(f"✅ {med_to_remove} removed successfully!")
         else:
