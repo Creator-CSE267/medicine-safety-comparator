@@ -20,6 +20,10 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 import io
 import streamlit as st
+from style import apply_theme, apply_layout_styles
+
+apply_theme()
+apply_layout_styles()
 
 # Initialize session state for theme persistence
 if "theme_choice" not in st.session_state:
