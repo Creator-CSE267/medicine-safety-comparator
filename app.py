@@ -400,46 +400,61 @@ elif menu == "📦 Inventory":
     try:
         inventory = pd.read_csv(INVENTORY_FILE)
 
+        # --- KPI Cards ---
+        if not inventory.empty:
+            total_meds = inventory["Medicine"].nunique()
+            total_stock = inventory["Stock"].sum()
+            expiring_soon = inventory[
+                pd.to_datetime(inventory["Expiry"], errors="coerce") <= pd.Timestamp.today() + pd.Timedelta(days=30)
+            ]
+            expiring_count = len(expiring_soon)
+
+            st.markdown("<div class='section-header'>📊 Inventory Overview</div>", unsafe_allow_html=True)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("💊 Total Medicines", total_meds)
+            col2.metric("📦 Total Stock", total_stock)
+            col3.metric("⏳ Expiring Soon", expiring_count)
+
         # --- Add Medicine ---
-        st.markdown("<div class='section-header'>➕ Add Medicine to Inventory</div>", unsafe_allow_html=True)
-        with st.container():
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            with st.form("add_medicine_form", clear_on_submit=True):
+        st.markdown("<div class='section-header'>➕ Add Medicine</div>", unsafe_allow_html=True)
+        with st.form("add_medicine_form", clear_on_submit=True):
+            col1, col2, col3 = st.columns(3)
+            with col1:
                 med_name = st.text_input("Medicine Name")
+            with col2:
                 stock = st.number_input("Stock Quantity", min_value=1, step=1)
+            with col3:
                 expiry = st.date_input("Expiry Date")
-                submitted = st.form_submit_button("➕ Add Medicine")
-                if submitted:
+
+            submitted = st.form_submit_button("➕ Add Medicine")
+            if submitted:
+                if med_name.strip():
                     new_entry = pd.DataFrame([[med_name, stock, expiry]], columns=["Medicine", "Stock", "Expiry"])
                     inventory = pd.concat([inventory, new_entry], ignore_index=True)
                     inventory.to_csv(INVENTORY_FILE, index=False)
                     st.success(f"✅ {med_name} added successfully!")
-            st.markdown("</div>", unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ Please enter a valid medicine name.")
 
         # --- View Inventory ---
         st.markdown("<div class='section-header'>📋 Current Inventory</div>", unsafe_allow_html=True)
-        with st.container():
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            if not inventory.empty:
-                st.dataframe(inventory, use_container_width=True)
-            else:
-                st.info("No medicines in inventory yet.")
-            st.markdown("</div>", unsafe_allow_html=True)
+        if not inventory.empty:
+            st.dataframe(inventory, use_container_width=True)
+        else:
+            st.info("No medicines in inventory yet.")
 
         # --- Remove Medicine ---
         st.markdown("<div class='section-header'>🗑️ Remove Medicine</div>", unsafe_allow_html=True)
-        with st.container():
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            if not inventory.empty:
-                med_to_remove = st.selectbox("Select Medicine to Remove", inventory["Medicine"].unique())
-                if st.button("🗑️ Remove Selected"):
-                    inventory = inventory[inventory["Medicine"] != med_to_remove]
-                    inventory.to_csv(INVENTORY_FILE, index=False)
-                    st.success(f"✅ {med_to_remove} removed successfully!")
-            else:
-                st.info("No medicines available to remove.")
-            st.markdown("</div>", unsafe_allow_html=True)
+        if not inventory.empty:
+            med_to_remove = st.selectbox("Select Medicine to Remove", inventory["Medicine"].unique())
+            if st.button("🗑️ Remove Selected"):
+                inventory = inventory[inventory["Medicine"] != med_to_remove]
+                inventory.to_csv(INVENTORY_FILE, index=False)
+                st.success(f"✅ {med_to_remove} removed successfully!")
+        else:
+            st.info("No medicines available to remove.")
 
     except Exception as e:
         st.error(f"⚠️ Could not read inventory: {e}")
         st.info("Try deleting or fixing `inventory.csv` if the issue persists.")
+
