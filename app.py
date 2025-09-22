@@ -368,27 +368,44 @@ elif menu == "📊 Dashboard":
     st.header("📊 Performance Dashboard")
 
     if os.path.exists(LOG_FILE):
-        logs = pd.read_csv(LOG_FILE)
-        logs["timestamp"] = pd.to_datetime(logs["timestamp"])
+        try:
+            logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")  # ✅ skip bad rows
+            logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
 
-        st.subheader("Recent Usage Logs")
-        st.dataframe(logs.tail(10))
+            st.subheader("Recent Usage Logs")
+            st.dataframe(logs.tail(10))
 
-        st.subheader("Safety Prediction Summary")
-        st.bar_chart(logs["Result"].value_counts())
+            st.subheader("Safety Prediction Summary")
+            if "Result" in logs.columns:
+                st.bar_chart(logs["Result"].value_counts())
 
-        st.subheader("Daily Usage Trend")
-        daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
-        st.line_chart(daily_trend)
+            st.subheader("Daily Usage Trend")
+            if "timestamp" in logs.columns:
+                daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
+                st.line_chart(daily_trend)
 
-        st.subheader("Most Frequently Compared Medicines")
-        st.bar_chart(logs["Ingredient"].value_counts().head(5))
+            st.subheader("Most Frequently Compared Medicines")
+            if "Ingredient" in logs.columns:
+                st.bar_chart(logs["Ingredient"].value_counts().head(5))
 
-        st.subheader("Competitor Safety Success Rate (%)")
-        success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
-        st.dataframe(success_rate)
+            st.subheader("Competitor Safety Success Rate (%)")
+            if "Result" in logs.columns:
+                success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
+                st.dataframe(success_rate)
+
+            # --- 🗑️ Clear Logs Button ---
+            st.markdown("---")
+            if st.button("🗑️ Clear Logs"):
+                os.remove(LOG_FILE)
+                st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
+
+        except Exception as e:
+            st.error(f"⚠️ Could not read logs: {e}")
+            st.info("Try clearing or deleting `usage_log.csv` if the issue persists.")
+
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
+
 
 # --- 📦 Inventory Page ---
 elif menu == "📦 Inventory":
