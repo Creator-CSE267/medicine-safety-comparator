@@ -183,6 +183,7 @@ with st.sidebar:
 # ===============================
 DATA_FILE = "medicine_dataset.csv"
 LOG_FILE = "usage_log.csv"
+INVENTORY_FILE = "inventory.csv"
 
 df = pd.read_csv(DATA_FILE, dtype={"UPC": str})
 df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
