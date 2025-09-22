@@ -328,9 +328,8 @@ if menu == "🧪 Testing":
 
 
 # --- 📊 Dashboard Page ---
-# --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
-    apply_global_css()
+    apply_global_css()   # ✅ apply styling
     st.markdown("<div class='main-title'>📊 Medicine Safety Analytics Dashboard</div>", unsafe_allow_html=True)
 
     if os.path.exists(LOG_FILE):
@@ -339,80 +338,39 @@ elif menu == "📊 Dashboard":
             logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
 
             if not logs.empty:
-                # --- KPIs ---
+                # --- KPI Cards ---
                 total_tests = len(logs)
                 safe_count = logs["Result"].str.lower().eq("safe").sum()
                 unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
                 most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
 
-                st.markdown("<div class='section-header'>📌 Key Metrics</div>", unsafe_allow_html=True)
+                st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
-                with col1: st.metric("🧪 Total Tests", total_tests)
-                with col2: st.metric("✅ Safe", safe_count)
-                with col3: st.metric("⚠️ Unsafe", unsafe_count)
-                with col4: st.metric("🔥 Top Ingredient", most_common_ing)
-
-                st.markdown("---")
+                col1.metric("🧪 Total Tests", total_tests)
+                col2.metric("✅ Safe", safe_count)
+                col3.metric("⚠️ Unsafe", unsafe_count)
+                col4.metric("🔥 Top Ingredient", most_common_ing)
 
                 # --- Trend Over Time ---
-                st.markdown("<div class='section-header'>📈 Test Activity Over Time</div>", unsafe_allow_html=True)
-                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="Tests")
+                st.markdown("<div class='section-header'>📈 Usage Trend Over Time</div>", unsafe_allow_html=True)
+                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
                 fig_trend = px.line(
-                    daily_trend,
-                    x="timestamp",
-                    y="Tests",
+                    daily_trend, x="timestamp", y="count",
                     markers=True,
+                    title="Tests Conducted Per Day"
                 )
-                fig_trend.update_traces(line_color="#2E86C1")
-                fig_trend.update_layout(
-                    title="Daily Tests",
-                    xaxis_title="Date",
-                    yaxis_title="Number of Tests",
-                    margin=dict(l=20, r=20, t=40, b=20),
-                    height=400
-                )
+                fig_trend.update_traces(line=dict(width=3, color="#2E86C1"))
+                fig_trend.update_layout(title_x=0.5)
                 st.plotly_chart(fig_trend, use_container_width=True)
-
-                # --- Safe vs Unsafe Donut ---
-                st.markdown("<div class='section-header'>🟢 Safe vs 🔴 Unsafe</div>", unsafe_allow_html=True)
-                result_counts = logs["Result"].value_counts()
-                fig_pie = px.pie(
-                    values=result_counts.values,
-                    names=result_counts.index,
-                    hole=0.5,
-                    color=result_counts.index,
-                    color_discrete_map={"Safe": "green", "Not Safe": "red"}
-                )
-                fig_pie.update_traces(textinfo="percent+label")
-                fig_pie.update_layout(height=400, showlegend=True)
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-                # --- Competitor Bar ---
-                if "Competitor" in logs.columns:
-                    st.markdown("<div class='section-header'>🏭 Competitor Comparison</div>", unsafe_allow_html=True)
-                    top_comp = logs["Competitor"].value_counts().head(5).reset_index()
-                    top_comp.columns = ["Competitor", "Tests"]
-                    fig_bar = px.bar(
-                        top_comp,
-                        x="Tests",
-                        y="Competitor",
-                        orientation="h",
-                        text="Tests",
-                        color="Tests",
-                        color_continuous_scale="Blues"
-                    )
-                    fig_bar.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
-                    st.plotly_chart(fig_bar, use_container_width=True)
 
                 # --- Recent Logs ---
                 st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
                 st.dataframe(
-                    logs.tail(10),
-                    use_container_width=True,
-                    height=250
+                    logs.tail(10)[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]],
+                    use_container_width=True
                 )
 
-                # --- Clear Logs ---
+                # --- Clear Logs Button ---
                 st.markdown("<div class='section-header'>🗑️ Manage Logs</div>", unsafe_allow_html=True)
                 if st.button("🗑️ Clear Logs"):
                     os.remove(LOG_FILE)
@@ -427,6 +385,7 @@ elif menu == "📊 Dashboard":
 
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
+
 
 
 
