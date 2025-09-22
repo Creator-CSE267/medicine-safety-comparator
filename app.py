@@ -413,6 +413,20 @@ elif menu == "📦 Inventory":
         medicines = pd.read_csv(INVENTORY_FILE)
         consumables = pd.read_csv(CONSUMABLES_FILE)
 
+        # ✅ Normalize medicine column names
+        rename_map = {
+            "Active Ingredient": "Ingredient",
+            "Batch Number": "Batch",
+            "Quantity": "Stock",
+            "Days Until Expiry": "Days Until Expiry"
+        }
+        medicines = medicines.rename(columns={k: v for k, v in rename_map.items() if k in medicines.columns})
+
+        # ✅ Add Expiry if missing (using Days Until Expiry)
+        if "Expiry" not in medicines.columns and "Days Until Expiry" in medicines.columns:
+            today = pd.Timestamp.today()
+            medicines["Expiry"] = today + pd.to_timedelta(medicines["Days Until Expiry"], unit="D")
+
         tab1, tab2 = st.tabs(["💊 Medicines", "🛠️ Consumables"])
 
         # -------------------------
@@ -563,5 +577,3 @@ elif menu == "📦 Inventory":
     except Exception as e:
         st.error(f"⚠️ Could not process inventory: {e}")
         st.info("Try deleting or fixing the CSV files if the issue persists.")
-
-
