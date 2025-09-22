@@ -200,9 +200,7 @@ if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
     st.subheader("🔍 Search by UPC or Active Ingredient")
 
-    # --- Show logo at top of Testing page ---
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=120)
+
 
     col1, col2 = st.columns(2)
     with col1:
