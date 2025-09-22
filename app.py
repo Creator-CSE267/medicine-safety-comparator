@@ -367,95 +367,111 @@ if menu == "🧪 Testing":
 
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
-    st.header("📊 Medicine Safety Analytics Dashboard")
+    st.markdown("## 📊 Medicine Safety Dashboard")
 
+    # Load logs if available
     if os.path.exists(LOG_FILE):
         try:
             logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")
             logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
 
-            if not logs.empty:
-                # --- KPI Cards ---
-                total_tests = len(logs)
-                safe_count = logs["Result"].str.lower().eq("safe").sum()
-                unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
-                most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
+            # --- KPI Metrics Row ---
+            col1, col2, col3, col4 = st.columns(4)
+            total_items = len(logs)
+            expiring_soon = 0   # 👉 replace with your own logic
+            expired = 0         # 👉 replace with your own logic
+            tests_today = logs[logs["timestamp"].dt.date == pd.Timestamp.today().date()].shape[0]
 
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("🧪 Total Tests", total_tests)
-                col2.metric("✅ Safe", safe_count)
-                col3.metric("⚠️ Unsafe", unsafe_count)
-                col4.metric("🔥 Most Common Ingredient", most_common_ing)
+            col1.metric("📦 Total Items", total_items)
+            col2.metric("⚠️ Expiring Soon", expiring_soon)
+            col3.metric("❌ Expired", expired)
+            col4.metric("🧪 Tests Today", tests_today)
 
-                st.markdown("---")
+            st.markdown("---")
 
-                # --- Competitor Safety Gauge ---
-                st.subheader("📊 Competitor Safety Rate")
-                safety_rate = (safe_count / total_tests * 100) if total_tests > 0 else 0
-
-                fig_gauge = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=safety_rate,
-                    title={"text": "Safety %"},
-                    gauge={
-                        "axis": {"range": [0, 100]},
-                        "bar": {"color": "green"},
-                        "steps": [
-                            {"range": [0, 40], "color": "red"},
-                            {"range": [40, 70], "color": "orange"},
-                            {"range": [70, 100], "color": "lightgreen"}
-                        ],
-                        "threshold": {
-                            "line": {"color": "black", "width": 4},
-                            "thickness": 0.75,
-                            "value": safety_rate
-                        }
-                    }
-                ))
-                st.plotly_chart(fig_gauge, use_container_width=True)
-
-                st.markdown("---")
-
-                # --- Trend Over Time ---
-                st.subheader("📈 Daily Usage Trend")
-                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
-                fig_trend = px.line(daily_trend, x="timestamp", y="count", markers=True, title="Tests Over Time")
-                st.plotly_chart(fig_trend, use_container_width=True)
-
-                # --- Safe vs Unsafe Pie ---
-                st.subheader("🟢 Safe vs 🔴 Unsafe Distribution")
-                result_counts = logs["Result"].value_counts()
-                fig_pie = px.pie(values=result_counts.values, names=result_counts.index, hole=0.4)
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-                # --- Top Competitors ---
-                st.subheader("🏭 Top 5 Compared Competitors")
-                if "Competitor" in logs.columns:
-                    top_comp = logs["Competitor"].value_counts().head(5).reset_index()
-                    top_comp.columns = ["Competitor", "Count"]
-                    fig_bar = px.bar(top_comp, x="Competitor", y="Count", text="Count")
-                    st.plotly_chart(fig_bar, use_container_width=True)
-
-                # --- Recent Logs ---
-                st.subheader("📋 Recent Activity")
-                st.dataframe(logs.tail(10), use_container_width=True)
-
-                # --- Clear Logs Button ---
-                st.markdown("---")
-                if st.button("🗑️ Clear Logs"):
-                    os.remove(LOG_FILE)
-                    st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
-
+            # --- Critical Alerts ---
+            st.markdown("### 🚨 Critical Alerts")
+            critical_alerts = []  # 👉 insert your own alert conditions
+            if critical_alerts:
+                for alert in critical_alerts:
+                    st.error(alert)
             else:
-                st.info("No data in logs yet. Run some comparisons first.")
+                st.info("No critical alerts at this time")
+
+            st.markdown("---")
+
+            # --- Recent Inventory & Quick Actions ---
+            col1, col2 = st.columns([2,1])
+
+            with col1:
+                st.markdown("### 📦 Recent Inventory")
+                if "Ingredient" in logs.columns:
+                    st.dataframe(logs.tail(5)[["timestamp","Ingredient","Result"]], use_container_width=True)
+                else:
+                    st.write("No items found")
+
+            with col2:
+                st.markdown("### ⚡ Quick Actions")
+                st.button("➕ Add New Item")
+                st.button("🧪 Schedule Test")
+                st.button("📤 Export Report")
+
+            st.markdown("---")
+
+            # --- Recent Testing ---
+            st.markdown("### 🧪 Recent Testing")
+            if not logs.empty:
+                st.dataframe(logs.tail(5), use_container_width=True)
+            else:
+                st.write("No recent testing records")
 
         except Exception as e:
             st.error(f"⚠️ Could not read logs: {e}")
             st.info("Try clearing or deleting `usage_log.csv` if the issue persists.")
 
     else:
+        # Empty state
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("📦 Total Items", 0)
+        col2.metric("⚠️ Expiring Soon", 0)
+        col3.metric("❌ Expired", 0)
+        col4.metric("🧪 Tests Today", 0)
+
+        st.markdown("---")
         st.info("No logs yet. Run some comparisons to see dashboard data.")
 
+        st.markdown("### 📦 Recent Inventory")
+        st.write("No items found")
+
+        st.markdown("### ⚡ Quick Actions")
+        st.button("➕ Add New Item")
+        st.button("🧪 Schedule Test")
+        st.button("📤 Export Report")
+
+        st.markdown("### 🧪 Recent Testing")
+        st.write("No recent testing records")
+
+
+# --- 💅 Styling ---
+st.markdown("""
+    <style>
+        /* KPI cards */
+        .stMetric {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+        /* Buttons */
+        .stButton>button {
+            width: 100%;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            height: 3em;
+            font-weight: bold;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 
 # --- 📦 Inventory Page ---
