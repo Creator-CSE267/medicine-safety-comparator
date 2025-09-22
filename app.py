@@ -366,10 +366,10 @@ if menu == "🧪 Testing":
             )
 
 # --- 📊 Dashboard Page ---
+# --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
     st.markdown("## 📊 Medicine Safety Dashboard")
 
-    # Load logs if available
     if os.path.exists(LOG_FILE):
         try:
             logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")
@@ -451,28 +451,7 @@ elif menu == "📊 Dashboard":
         st.markdown("### 🧪 Recent Testing")
         st.write("No recent testing records")
 
-
-# --- 💅 Styling ---
-st.markdown("""
-    <style>
-        /* KPI cards */
-        .stMetric {
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-        }
-        /* Buttons */
-        .stButton>button {
-            width: 100%;
-            margin-bottom: 10px;
-            border-radius: 10px;
-            height: 3em;
-            font-weight: bold;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
+    # ✅ close the Dashboard block cleanly here
 
 # --- 📦 Inventory Page ---
 elif menu == "📦 Inventory":
