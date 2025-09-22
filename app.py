@@ -393,26 +393,37 @@ elif menu == "📊 Dashboard":
 elif menu == "📦 Inventory":
     st.markdown("<div class='main-title'>📦 Inventory Management</div>", unsafe_allow_html=True)
 
-    # Ensure inventory file exists
+    # Define schema
+    INVENTORY_COLUMNS = ["UPC", "Ingredient", "Stock", "Expiry", "Manufacturer", "Batch"]
+
+    # Ensure inventory file exists with locked schema
     if not os.path.exists(INVENTORY_FILE):
-        pd.DataFrame(columns=["UPC", "Ingredient", "Stock", "Expiry", "Manufacturer", "Batch"]).to_csv(INVENTORY_FILE, index=False)
+        pd.DataFrame(columns=INVENTORY_COLUMNS).to_csv(INVENTORY_FILE, index=False)
 
     try:
-        # Load both datasets
+        # Load inventory
         inventory = pd.read_csv(INVENTORY_FILE)
+
+        # Force schema (add missing cols, drop extras)
+        for col in INVENTORY_COLUMNS:
+            if col not in inventory.columns:
+                inventory[col] = "" if col not in ["Stock"] else 0
+        inventory = inventory[INVENTORY_COLUMNS]
+
+        # Load consumables
         consumables = pd.read_csv("consumables_dataset.csv")
 
         # --- Normalize Medicines ---
         medicines_normalized = pd.DataFrame()
         if not inventory.empty:
             medicines_normalized = pd.DataFrame({
-                "UPC": inventory["UPC"] if "UPC" in inventory.columns else "",
-                "Name": inventory["Ingredient"] if "Ingredient" in inventory.columns else inventory["Medicine"],
+                "UPC": inventory["UPC"],
+                "Name": inventory["Ingredient"],
                 "Type": "Medicine",
-                "Stock": inventory["Stock"] if "Stock" in inventory.columns else 0,
-                "Expiry": inventory["Expiry"] if "Expiry" in inventory.columns else "",
-                "Manufacturer": inventory["Manufacturer"] if "Manufacturer" in inventory.columns else "",
-                "Batch": inventory["Batch"] if "Batch" in inventory.columns else "",
+                "Stock": inventory["Stock"],
+                "Expiry": inventory["Expiry"],
+                "Manufacturer": inventory["Manufacturer"],
+                "Batch": inventory["Batch"],
                 "Safe/Not Safe": "Safe",
                 "Extra Info": ""
             })
@@ -452,14 +463,14 @@ elif menu == "📦 Inventory":
             col2.metric("📦 Total Stock", total_stock)
             col3.metric("⏳ Expiring Soon", expiring_count)
 
-        # --- Add Medicine ---
+        # --- Add / Update Medicine ---
         st.markdown("<div class='section-header'>➕ Add / Update Medicine</div>", unsafe_allow_html=True)
         with st.form("add_medicine_form", clear_on_submit=True):
             col1, col2, col3 = st.columns(3)
             with col1:
                 upc = st.text_input("UPC")
             with col2:
-                med_name = st.text_input("Ingredient / Medicine Name")
+                med_name = st.text_input("Ingredient")
             with col3:
                 stock = st.number_input("Stock Quantity", min_value=1, step=1)
 
@@ -487,20 +498,20 @@ elif menu == "📦 Inventory":
             submitted = st.form_submit_button("➕ Save")
             if submitted:
                 if med_name.strip():
-                    # --- Update stock if UPC already exists in inventory
-                    if "UPC" in inventory.columns and upc in inventory["UPC"].astype(str).values:
+                    # --- Update stock if UPC exists
+                    if upc in inventory["UPC"].astype(str).values:
                         inventory.loc[inventory["UPC"].astype(str) == str(upc), "Stock"] += stock
                         st.success(f"✅ Stock updated for {med_name} (UPC: {upc})")
                     else:
                         new_entry = pd.DataFrame([[upc, med_name, stock, expiry, manufacturer, batch]],
-                                                 columns=["UPC", "Ingredient", "Stock", "Expiry", "Manufacturer", "Batch"])
+                                                 columns=INVENTORY_COLUMNS)
                         inventory = pd.concat([inventory, new_entry], ignore_index=True)
                         st.success(f"✅ {med_name} added successfully!")
 
-                    # --- Sync back to inventory.csv
+                    # Save inventory with locked schema
                     inventory.to_csv(INVENTORY_FILE, index=False)
 
-                    # --- Sync stock to consumables_dataset.csv
+                    # Sync to consumables
                     if upc in consumables["UPC"].astype(str).values:
                         consumables.loc[consumables["UPC"].astype(str) == str(upc), "Quantity in Stock"] += stock
                     else:
@@ -522,7 +533,7 @@ elif menu == "📦 Inventory":
                     consumables.to_csv("consumables_dataset.csv", index=False)
 
                 else:
-                    st.warning("⚠️ Please enter a valid medicine name.")
+                    st.warning("⚠️ Please enter a valid Ingredient.")
 
         # --- View Inventory ---
         st.markdown("<div class='section-header'>📋 Current Inventory</div>", unsafe_allow_html=True)
@@ -534,22 +545,13 @@ elif menu == "📦 Inventory":
         # --- Remove Item ---
         st.markdown("<div class='section-header'>🗑️ Remove Item</div>", unsafe_allow_html=True)
         if not inventory.empty:
-            med_to_remove = st.selectbox(
-                "Select Medicine to Remove",
-                inventory["Ingredient"].unique() if "Ingredient" in inventory.columns else inventory["Medicine"].unique()
-            )
+            med_to_remove = st.selectbox("Select Medicine to Remove", inventory["Ingredient"].unique())
             if st.button("🗑️ Remove Selected"):
-                if "Ingredient" in inventory.columns:
-                    target_upc = inventory.loc[inventory["Ingredient"] == med_to_remove, "UPC"].values[0]
-                    inventory = inventory[inventory["Ingredient"] != med_to_remove]
-                else:
-                    target_upc = inventory.loc[inventory["Medicine"] == med_to_remove, "UPC"].values[0]
-                    inventory = inventory[inventory["Medicine"] != med_to_remove]
-
-                # Remove also from consumables
+                target_upc = inventory.loc[inventory["Ingredient"] == med_to_remove, "UPC"].values[0]
+                inventory = inventory[inventory["Ingredient"] != med_to_remove]
                 consumables = consumables[consumables["UPC"].astype(str) != str(target_upc)]
 
-                # Save back both files
+                # Save back both files with locked schema
                 inventory.to_csv(INVENTORY_FILE, index=False)
                 consumables.to_csv("consumables_dataset.csv", index=False)
 
