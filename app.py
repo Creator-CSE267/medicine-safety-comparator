@@ -52,6 +52,8 @@ set_background("bg4.jpg")
 
 # --- Logo Centered ---
 if os.path.exists("logo.png"):
+    logo = Image.open("logo.png")
+    st.image(logo, width=120)
     st.markdown(
         """
         <style>
@@ -357,6 +359,13 @@ if menu == "🧪 Testing":
                         file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                         mime="application/pdf"
                     )
+                    with open("report.pdf", "rb") as pdf_file:
+    st.download_button(
+        label="⬇️ Download Report",
+        data=pdf_file,
+        file_name="medicine_report.pdf",
+        mime="application/pdf"
+    )
 
 
 # --- 📊 Dashboard Page ---
