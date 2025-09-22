@@ -15,159 +15,28 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from datetime import datetime
 from PIL import Image
+import io
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
-import io
-import streamlit as st
-from styles import apply_theme, apply_layout_styles
 
+# Import custom styles
+from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
+# ===============================
+# Apply Styles
+# ===============================
 apply_theme()
 apply_layout_styles()
 
-# Initialize session state for theme persistence
-if "theme_choice" not in st.session_state:
-    st.session_state.theme_choice = "Light"   # Default theme
-if "custom_theme" not in st.session_state:
-    st.session_state.custom_theme = {
-        "text_color": "#000000",
-        "metric_bg": "#f0f0f0",
-        "button_text": "#000000",
-        "button_bg": "#e0e0e0",
-        "header_color": "#000000",
-    }
-
-# Preset themes
-THEMES = {
-    "Light": {
-        "text_color": "#000000",
-        "metric_bg": "#f9f9f9",
-        "button_text": "#000000",
-        "button_bg": "#e0e0e0",
-        "header_color": "#000000",
-    },
-    "Dark": {
-        "text_color": "#FFFFFF",
-        "metric_bg": "#333333",
-        "button_text": "#FFFFFF",
-        "button_bg": "#444444",
-        "header_color": "#FFFFFF",
-    }
-}
-
-# Sidebar theme selector
-st.sidebar.header("🎨 Theme Settings")
-theme_choice = st.sidebar.radio(
-    "Choose Theme",
-    ["Light", "Dark", "Custom"],
-    index=["Light", "Dark", "Custom"].index(st.session_state.theme_choice)
-)
-
-# Save user choice
-st.session_state.theme_choice = theme_choice
-
-# Apply chosen theme
-if theme_choice in THEMES:
-    THEME = THEMES[theme_choice]
-else:
-    # Custom theme via color pickers
-    custom = st.session_state.custom_theme
-    custom["text_color"]   = st.sidebar.color_picker("Text Color", custom["text_color"])
-    custom["metric_bg"]    = st.sidebar.color_picker("KPI Card Background", custom["metric_bg"])
-    custom["button_text"]  = st.sidebar.color_picker("Button Text Color", custom["button_text"])
-    custom["button_bg"]    = st.sidebar.color_picker("Button Background", custom["button_bg"])
-    custom["header_color"] = st.sidebar.color_picker("Header Color", custom["header_color"])
-    st.session_state.custom_theme = custom
-    THEME = custom
-
-# Apply global CSS
-st.markdown(f"""
-    <style>
-        html, body, [class*="css"] {{
-            color: {THEME['text_color']} !important;
-        }}
-
-        .stMetric {{
-            background: {THEME['metric_bg']};
-            padding: 15px;
-            border-radius: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-            color: {THEME['text_color']} !important;
-        }}
-
-        .stButton>button {{
-            width: 100%;
-            margin-bottom: 10px;
-            border-radius: 10px;
-            height: 3em;
-            font-weight: bold;
-            color: {THEME['button_text']} !important;
-            background-color: {THEME['button_bg']} !important;
-        }}
-
-        .stDataFrame, .stTable {{
-            color: {THEME['text_color']} !important;
-        }}
-
-        h1, h2, h3, h4, h5, h6 {{
-            color: {THEME['header_color']} !important;
-        }}
-    </style>
-""", unsafe_allow_html=True)
-
 # ===============================
-# Page Design
+# Page Config
 # ===============================
 st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
 
-# --- Background ---
-def set_background(image_file):
-    import base64
-    with open(image_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-image: url("data:image/jpg;base64,{encoded}");
-            background-size: cover;
-            background-repeat: no-repeat;
-            background-position: center;
-            background-attachment: fixed;
-            color: #FFFFFF;
-        }}
-        .block-container {{
-            background: transparent !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-# Example background
+# Background + Logo
 set_background("bg4.jpg")
-
-# --- Logo Centered ---
-if os.path.exists("logo.png"):
-    logo = Image.open("logo.png")
-    st.image(logo, width=120)
-    st.markdown(
-        """
-        <style>
-        .logo-container {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 10px;
-        }
-        .logo-container img {
-            width: 180px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-    st.markdown('<div class="logo-container"><img src="logo.png"></div>', unsafe_allow_html=True)
+show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
 
@@ -176,9 +45,7 @@ st.title("💊 Medicine Safety Comparator")
 # ===============================
 with st.sidebar:
     st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
-
     menu = st.radio("📌 Navigation", ["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
-
     st.markdown("---")
     st.write("ℹ️ Version 1.0.0")
     st.write("© 2025 MedSafe AI")
@@ -193,7 +60,6 @@ INVENTORY_FILE = "inventory.csv"
 df = pd.read_csv(DATA_FILE, dtype={"UPC": str})
 df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
 
-# Fill missing values
 df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
 if "Disease/Use Case" not in df.columns:
     df["Disease/Use Case"] = "Unknown"
@@ -207,7 +73,7 @@ y = df["Safe/Not Safe"]
 le = LabelEncoder()
 y = le.fit_transform(y)
 
-# Add dummy row if dataset has only 1 class
+# Ensure dataset has both classes
 if len(np.unique(y)) < 2:
     dummy_row = df.iloc[0].copy()
     dummy_row["Active Ingredient"] = "DummyUnsafe"
@@ -216,7 +82,6 @@ if len(np.unique(y)) < 2:
     y = df["Safe/Not Safe"]
     y = le.fit_transform(y)
 
-# Feature columns
 numeric_cols = [
     "Days Until Expiry",
     "Storage Temperature (C)",
@@ -233,7 +98,7 @@ if df["Warning Labels Present"].dtype == "object":
 X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
 
 # ===============================
-# Train model
+# Train Model
 # ===============================
 def train_model(X, y):
     numeric_transformer = Pipeline(steps=[
@@ -276,7 +141,6 @@ SAFETY_RULES = {
 }
 
 def suggest_improvements(values):
-    """Check competitor values against safety rules and suggest fixes."""
     suggestions = []
     for col, val in values.items():
         rule = SAFETY_RULES.get(col, {})
