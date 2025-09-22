@@ -50,7 +50,7 @@ def set_background(image_file):
     )
 
 # Example background
-set_background("bg1.jpg")
+set_background("bg4.jpg")
 
 # --- Logo Centered ---
 if os.path.exists("logo.png"):
