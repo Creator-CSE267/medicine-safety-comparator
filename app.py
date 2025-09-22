@@ -326,9 +326,10 @@ if menu == "🧪 Testing":
                 mime="application/pdf"
             )
 
+
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
-    apply_global_css()   # ✅ apply styling
+    apply_global_css()
     st.markdown("<div class='main-title'>📊 Medicine Safety Analytics Dashboard</div>", unsafe_allow_html=True)
 
     if os.path.exists(LOG_FILE):
@@ -343,62 +344,61 @@ elif menu == "📊 Dashboard":
                 unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
                 most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
 
-                st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("🧪 Total Tests", total_tests)
                 col2.metric("✅ Safe", safe_count)
                 col3.metric("⚠️ Unsafe", unsafe_count)
-                col4.metric("🔥 Most Common Ingredient", most_common_ing)
+                col4.metric("🔥 Top Ingredient", most_common_ing)
 
-                # --- Competitor Safety Gauge ---
-                st.markdown("<div class='section-header'>📊 Competitor Safety Rate</div>", unsafe_allow_html=True)
-                safety_rate = (safe_count / total_tests * 100) if total_tests > 0 else 0
-                fig_gauge = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=safety_rate,
-                    title={"text": "Safety %"},
-                    gauge={
-                        "axis": {"range": [0, 100]},
-                        "bar": {"color": "green"},
-                        "steps": [
-                            {"range": [0, 40], "color": "red"},
-                            {"range": [40, 70], "color": "orange"},
-                            {"range": [70, 100], "color": "lightgreen"}
-                        ],
-                        "threshold": {
-                            "line": {"color": "black", "width": 4},
-                            "thickness": 0.75,
-                            "value": safety_rate
-                        }
-                    }
-                ))
-                st.plotly_chart(fig_gauge, use_container_width=True)
+                st.markdown("---")
 
-                # --- Trend Over Time ---
-                st.markdown("<div class='section-header'>📈 Daily Usage Trend</div>", unsafe_allow_html=True)
-                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
-                fig_trend = px.line(daily_trend, x="timestamp", y="count", markers=True, title="Tests Over Time")
+                # --- Trend Over Time (Official look: smooth line/area) ---
+                st.markdown("<div class='section-header'>📈 Test Trends Over Time</div>", unsafe_allow_html=True)
+                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="Tests")
+                fig_trend = px.area(
+                    daily_trend,
+                    x="timestamp",
+                    y="Tests",
+                    title="Daily Test Activity",
+                    markers=True
+                )
+                fig_trend.update_traces(line_color="#2E86C1", fill="tozeroy")
+                fig_trend.update_layout(showlegend=False, margin=dict(l=30, r=30, t=50, b=30))
                 st.plotly_chart(fig_trend, use_container_width=True)
 
-                # --- Safe vs Unsafe Pie ---
-                st.markdown("<div class='section-header'>🟢 Safe vs 🔴 Unsafe Distribution</div>", unsafe_allow_html=True)
+                # --- Safe vs Unsafe Distribution (minimal donut) ---
+                st.markdown("<div class='section-header'>🟢 Safe vs 🔴 Unsafe</div>", unsafe_allow_html=True)
                 result_counts = logs["Result"].value_counts()
-                fig_pie = px.pie(values=result_counts.values, names=result_counts.index, hole=0.4)
+                fig_pie = px.pie(
+                    values=result_counts.values,
+                    names=result_counts.index,
+                    hole=0.5
+                )
+                fig_pie.update_traces(textinfo="percent+label", pull=[0.05, 0])
+                fig_pie.update_layout(margin=dict(l=30, r=30, t=30, b=30))
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-                # --- Top Competitors ---
+                # --- Competitor Comparison (Bar Chart) ---
                 if "Competitor" in logs.columns:
-                    st.markdown("<div class='section-header'>🏭 Top 5 Compared Competitors</div>", unsafe_allow_html=True)
-                    top_comp = logs["Competitor"].value_counts().head(5).reset_index()
-                    top_comp.columns = ["Competitor", "Count"]
-                    fig_bar = px.bar(top_comp, x="Competitor", y="Count", text="Count")
+                    st.markdown("<div class='section-header'>🏭 Competitor Comparison</div>", unsafe_allow_html=True)
+                    top_comp = logs["Competitor"].value_counts().head(6).reset_index()
+                    top_comp.columns = ["Competitor", "Tests"]
+                    fig_bar = px.bar(
+                        top_comp,
+                        x="Competitor",
+                        y="Tests",
+                        text="Tests",
+                        title="Top Competitors by Test Count"
+                    )
+                    fig_bar.update_traces(marker_color="#34495E", textposition="outside")
+                    fig_bar.update_layout(margin=dict(l=30, r=30, t=50, b=30))
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                # --- Recent Logs ---
-                st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
+                # --- Recent Logs Table ---
+                st.markdown("<div class='section-header'>📋 Recent Test Logs</div>", unsafe_allow_html=True)
                 st.dataframe(logs.tail(10), use_container_width=True)
 
-                # --- Clear Logs Button ---
+                # --- Manage Logs ---
                 st.markdown("<div class='section-header'>🗑️ Manage Logs</div>", unsafe_allow_html=True)
                 if st.button("🗑️ Clear Logs"):
                     os.remove(LOG_FILE)
