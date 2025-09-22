@@ -328,6 +328,7 @@ if menu == "🧪 Testing":
 
 
 # --- 📊 Dashboard Page ---
+# --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
     apply_global_css()
     st.markdown("<div class='main-title'>📊 Medicine Safety Analytics Dashboard</div>", unsafe_allow_html=True)
@@ -338,67 +339,80 @@ elif menu == "📊 Dashboard":
             logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
 
             if not logs.empty:
-                # --- KPI Cards ---
+                # --- KPIs ---
                 total_tests = len(logs)
                 safe_count = logs["Result"].str.lower().eq("safe").sum()
                 unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
                 most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
 
+                st.markdown("<div class='section-header'>📌 Key Metrics</div>", unsafe_allow_html=True)
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("🧪 Total Tests", total_tests)
-                col2.metric("✅ Safe", safe_count)
-                col3.metric("⚠️ Unsafe", unsafe_count)
-                col4.metric("🔥 Top Ingredient", most_common_ing)
+                with col1: st.metric("🧪 Total Tests", total_tests)
+                with col2: st.metric("✅ Safe", safe_count)
+                with col3: st.metric("⚠️ Unsafe", unsafe_count)
+                with col4: st.metric("🔥 Top Ingredient", most_common_ing)
 
                 st.markdown("---")
 
-                # --- Trend Over Time (Official look: smooth line/area) ---
-                st.markdown("<div class='section-header'>📈 Test Trends Over Time</div>", unsafe_allow_html=True)
+                # --- Trend Over Time ---
+                st.markdown("<div class='section-header'>📈 Test Activity Over Time</div>", unsafe_allow_html=True)
                 daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="Tests")
-                fig_trend = px.area(
+                fig_trend = px.line(
                     daily_trend,
                     x="timestamp",
                     y="Tests",
-                    title="Daily Test Activity",
-                    markers=True
+                    markers=True,
                 )
-                fig_trend.update_traces(line_color="#2E86C1", fill="tozeroy")
-                fig_trend.update_layout(showlegend=False, margin=dict(l=30, r=30, t=50, b=30))
+                fig_trend.update_traces(line_color="#2E86C1")
+                fig_trend.update_layout(
+                    title="Daily Tests",
+                    xaxis_title="Date",
+                    yaxis_title="Number of Tests",
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    height=400
+                )
                 st.plotly_chart(fig_trend, use_container_width=True)
 
-                # --- Safe vs Unsafe Distribution (minimal donut) ---
+                # --- Safe vs Unsafe Donut ---
                 st.markdown("<div class='section-header'>🟢 Safe vs 🔴 Unsafe</div>", unsafe_allow_html=True)
                 result_counts = logs["Result"].value_counts()
                 fig_pie = px.pie(
                     values=result_counts.values,
                     names=result_counts.index,
-                    hole=0.5
+                    hole=0.5,
+                    color=result_counts.index,
+                    color_discrete_map={"Safe": "green", "Not Safe": "red"}
                 )
-                fig_pie.update_traces(textinfo="percent+label", pull=[0.05, 0])
-                fig_pie.update_layout(margin=dict(l=30, r=30, t=30, b=30))
+                fig_pie.update_traces(textinfo="percent+label")
+                fig_pie.update_layout(height=400, showlegend=True)
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-                # --- Competitor Comparison (Bar Chart) ---
+                # --- Competitor Bar ---
                 if "Competitor" in logs.columns:
                     st.markdown("<div class='section-header'>🏭 Competitor Comparison</div>", unsafe_allow_html=True)
-                    top_comp = logs["Competitor"].value_counts().head(6).reset_index()
+                    top_comp = logs["Competitor"].value_counts().head(5).reset_index()
                     top_comp.columns = ["Competitor", "Tests"]
                     fig_bar = px.bar(
                         top_comp,
-                        x="Competitor",
-                        y="Tests",
+                        x="Tests",
+                        y="Competitor",
+                        orientation="h",
                         text="Tests",
-                        title="Top Competitors by Test Count"
+                        color="Tests",
+                        color_continuous_scale="Blues"
                     )
-                    fig_bar.update_traces(marker_color="#34495E", textposition="outside")
-                    fig_bar.update_layout(margin=dict(l=30, r=30, t=50, b=30))
+                    fig_bar.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                # --- Recent Logs Table ---
-                st.markdown("<div class='section-header'>📋 Recent Test Logs</div>", unsafe_allow_html=True)
-                st.dataframe(logs.tail(10), use_container_width=True)
+                # --- Recent Logs ---
+                st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
+                st.dataframe(
+                    logs.tail(10),
+                    use_container_width=True,
+                    height=250
+                )
 
-                # --- Manage Logs ---
+                # --- Clear Logs ---
                 st.markdown("<div class='section-header'>🗑️ Manage Logs</div>", unsafe_allow_html=True)
                 if st.button("🗑️ Clear Logs"):
                     os.remove(LOG_FILE)
@@ -413,6 +427,7 @@ elif menu == "📊 Dashboard":
 
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
+
 
 
 # --- 📦 Inventory Page ---
