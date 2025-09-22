@@ -1,4 +1,7 @@
+# styles.py
 import streamlit as st
+import base64
+import os
 
 # -------------------------------
 # 🎨 Theme + CSS Styling
@@ -6,7 +9,7 @@ import streamlit as st
 def apply_theme():
     # Initialize session state for theme persistence
     if "theme_choice" not in st.session_state:
-        st.session_state.theme_choice = "Light"   # Default theme
+        st.session_state.theme_choice = "Light"
     if "custom_theme" not in st.session_state:
         st.session_state.custom_theme = {
             "text_color": "#000000",
@@ -16,7 +19,6 @@ def apply_theme():
             "header_color": "#000000",
         }
 
-    # Preset themes
     THEMES = {
         "Light": {
             "text_color": "#000000",
@@ -31,7 +33,7 @@ def apply_theme():
             "button_text": "#FFFFFF",
             "button_bg": "#444444",
             "header_color": "#FFFFFF",
-        }
+        },
     }
 
     # Sidebar theme selector
@@ -39,7 +41,8 @@ def apply_theme():
     theme_choice = st.sidebar.radio(
         "Choose Theme",
         ["Light", "Dark", "Custom"],
-        index=["Light", "Dark", "Custom"].index(st.session_state.theme_choice)
+        index=["Light", "Dark", "Custom"].index(st.session_state.theme_choice),
+        key="theme_selector"
     )
 
     st.session_state.theme_choice = theme_choice
@@ -57,7 +60,7 @@ def apply_theme():
         st.session_state.custom_theme = custom
         THEME = custom
 
-    # Apply global CSS
+    # Inject CSS
     st.markdown(f"""
         <style>
             html, body, [class*="css"] {{
@@ -78,6 +81,9 @@ def apply_theme():
                 font-weight: bold;
                 color: {THEME['button_text']} !important;
                 background-color: {THEME['button_bg']} !important;
+            }}
+            .stDataFrame, .stTable {{
+                color: {THEME['text_color']} !important;
             }}
             h1, h2, h3, h4, h5, h6 {{
                 color: {THEME['header_color']} !important;
@@ -113,26 +119,56 @@ def apply_layout_styles():
             margin-bottom: 20px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.1);
         }
-
-        /* 🔹 KPI Cards */
-        .kpi-card {
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            text-align: center;
-            margin: 10px;
-        }
-        .kpi-title {
-            font-size: 1.1em;
-            font-weight: 600;
-            color: #2E86C1;
-            margin-bottom: 8px;
-        }
-        .kpi-value {
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #000000;
-        }
         </style>
     """, unsafe_allow_html=True)
+
+
+# -------------------------------
+# 🌄 Background Styling
+# -------------------------------
+def set_background(image_file):
+    if not os.path.exists(image_file):
+        return
+    with open(image_file, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode()
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/jpg;base64,{encoded}");
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-attachment: fixed;
+        }}
+        .block-container {{
+            background: transparent !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+# -------------------------------
+# 🏥 Logo Styling
+# -------------------------------
+def show_logo(logo_path="logo.png"):
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=120)
+        st.markdown(
+            """
+            <style>
+            .logo-container {
+                display: flex;
+                justify-content: center;
+                margin-bottom: 10px;
+            }
+            .logo-container img {
+                width: 180px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown(f'<div class="logo-container"><img src="{logo_path}"></div>', unsafe_allow_html=True)
