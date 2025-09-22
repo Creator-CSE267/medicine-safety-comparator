@@ -459,99 +459,165 @@ if menu == "🧪 Testing":
 # --- 📊 Dashboard Page ---
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
-    st.markdown("## 📊 Medicine Safety Dashboard")
+    st.markdown("<div class='main-title'>📊 Medicine Safety Analytics Dashboard</div>", unsafe_allow_html=True)
 
     if os.path.exists(LOG_FILE):
         try:
             logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")
             logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
 
-            # --- KPI Metrics Row ---
-            col1, col2, col3, col4 = st.columns(4)
-            total_items = len(logs)
-            expiring_soon = 0   # 👉 replace with your own logic
-            expired = 0         # 👉 replace with your own logic
-            tests_today = logs[logs["timestamp"].dt.date == pd.Timestamp.today().date()].shape[0]
-
-            col1.metric("📦 Total Items", total_items)
-            col2.metric("⚠️ Expiring Soon", expiring_soon)
-            col3.metric("❌ Expired", expired)
-            col4.metric("🧪 Tests Today", tests_today)
-
-            st.markdown("---")
-
-            # --- Critical Alerts ---
-            st.markdown("### 🚨 Critical Alerts")
-            critical_alerts = []  # 👉 insert your own alert conditions
-            if critical_alerts:
-                for alert in critical_alerts:
-                    st.error(alert)
-            else:
-                st.info("No critical alerts at this time")
-
-            st.markdown("---")
-
-            # --- Recent Inventory & Quick Actions ---
-            col1, col2 = st.columns([2,1])
-
-            with col1:
-                st.markdown("### 📦 Recent Inventory")
-                if "Ingredient" in logs.columns:
-                    st.dataframe(logs.tail(5)[["timestamp","Ingredient","Result"]], use_container_width=True)
-                else:
-                    st.write("No items found")
-
-            with col2:
-                st.markdown("### ⚡ Quick Actions")
-                st.button("➕ Add New Item")
-                st.button("🧪 Schedule Test")
-                st.button("📤 Export Report")
-
-            st.markdown("---")
-
-            # --- Recent Testing ---
-            st.markdown("### 🧪 Recent Testing")
             if not logs.empty:
-                st.dataframe(logs.tail(5), use_container_width=True)
+                # --- KPI Cards ---
+                total_tests = len(logs)
+                safe_count = logs["Result"].str.lower().eq("safe").sum()
+                unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
+                most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
+
+                st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
+                with st.container():
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("🧪 Total Tests", total_tests)
+                    col2.metric("✅ Safe", safe_count)
+                    col3.metric("⚠️ Unsafe", unsafe_count)
+                    col4.metric("🔥 Most Common Ingredient", most_common_ing)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # --- Competitor Safety Gauge ---
+                st.markdown("<div class='section-header'>📊 Competitor Safety Rate</div>", unsafe_allow_html=True)
+                with st.container():
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+                    safety_rate = (safe_count / total_tests * 100) if total_tests > 0 else 0
+
+                    fig_gauge = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=safety_rate,
+                        title={"text": "Safety %"},
+                        gauge={
+                            "axis": {"range": [0, 100]},
+                            "bar": {"color": "green"},
+                            "steps": [
+                                {"range": [0, 40], "color": "red"},
+                                {"range": [40, 70], "color": "orange"},
+                                {"range": [70, 100], "color": "lightgreen"}
+                            ],
+                            "threshold": {
+                                "line": {"color": "black", "width": 4},
+                                "thickness": 0.75,
+                                "value": safety_rate
+                            }
+                        }
+                    ))
+                    st.plotly_chart(fig_gauge, use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # --- Trend Over Time ---
+                st.markdown("<div class='section-header'>📈 Daily Usage Trend</div>", unsafe_allow_html=True)
+                with st.container():
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+                    daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
+                    fig_trend = px.line(daily_trend, x="timestamp", y="count", markers=True, title="Tests Over Time")
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # --- Safe vs Unsafe Pie ---
+                st.markdown("<div class='section-header'>🟢 Safe vs 🔴 Unsafe Distribution</div>", unsafe_allow_html=True)
+                with st.container():
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+                    result_counts = logs["Result"].value_counts()
+                    fig_pie = px.pie(values=result_counts.values, names=result_counts.index, hole=0.4)
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # --- Top Competitors ---
+                if "Competitor" in logs.columns:
+                    st.markdown("<div class='section-header'>🏭 Top 5 Compared Competitors</div>", unsafe_allow_html=True)
+                    with st.container():
+                        st.markdown("<div class='card'>", unsafe_allow_html=True)
+                        top_comp = logs["Competitor"].value_counts().head(5).reset_index()
+                        top_comp.columns = ["Competitor", "Count"]
+                        fig_bar = px.bar(top_comp, x="Competitor", y="Count", text="Count")
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                # --- Recent Logs ---
+                st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
+                with st.container():
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+                    st.dataframe(logs.tail(10), use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # --- Clear Logs Button ---
+                st.markdown("<div class='section-header'>🗑️ Manage Logs</div>", unsafe_allow_html=True)
+                with st.container():
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+                    if st.button("🗑️ Clear Logs"):
+                        os.remove(LOG_FILE)
+                        st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
+                    st.markdown("</div>", unsafe_allow_html=True)
+
             else:
-                st.write("No recent testing records")
+                st.info("No data in logs yet. Run some comparisons first.")
 
         except Exception as e:
             st.error(f"⚠️ Could not read logs: {e}")
             st.info("Try clearing or deleting `usage_log.csv` if the issue persists.")
 
     else:
-        # Empty state
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("📦 Total Items", 0)
-        col2.metric("⚠️ Expiring Soon", 0)
-        col3.metric("❌ Expired", 0)
-        col4.metric("🧪 Tests Today", 0)
-
-        st.markdown("---")
         st.info("No logs yet. Run some comparisons to see dashboard data.")
 
-        st.markdown("### 📦 Recent Inventory")
-        st.write("No items found")
-
-        st.markdown("### ⚡ Quick Actions")
-        st.button("➕ Add New Item")
-        st.button("🧪 Schedule Test")
-        st.button("📤 Export Report")
-
-        st.markdown("### 🧪 Recent Testing")
-        st.write("No recent testing records")
-
-    # ✅ close the Dashboard block cleanly here
 
 # --- 📦 Inventory Page ---
 elif menu == "📦 Inventory":
-    st.header("📦 Medicine Inventory")
+    st.markdown("<div class='main-title'>📦 Medicine Inventory Management</div>", unsafe_allow_html=True)
 
-    st.write("Browse the dataset currently loaded into the app.")
-    st.dataframe(df)
+    # Ensure inventory file exists
+    if not os.path.exists(INVENTORY_FILE):
+        pd.DataFrame(columns=["Medicine", "Stock", "Expiry"]).to_csv(INVENTORY_FILE, index=False)
 
-    st.write("### Dataset Overview")
-    st.write(f"Total Medicines: {len(df)}")
-    st.write("Active Ingredients Distribution:")
-    st.bar_chart(df["Active Ingredient"].value_counts().head(10))
+    try:
+        inventory = pd.read_csv(INVENTORY_FILE)
+
+        # --- Add Medicine ---
+        st.markdown("<div class='section-header'>➕ Add Medicine to Inventory</div>", unsafe_allow_html=True)
+        with st.container():
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            with st.form("add_medicine_form", clear_on_submit=True):
+                med_name = st.text_input("Medicine Name")
+                stock = st.number_input("Stock Quantity", min_value=1, step=1)
+                expiry = st.date_input("Expiry Date")
+                submitted = st.form_submit_button("➕ Add Medicine")
+                if submitted:
+                    new_entry = pd.DataFrame([[med_name, stock, expiry]], columns=["Medicine", "Stock", "Expiry"])
+                    inventory = pd.concat([inventory, new_entry], ignore_index=True)
+                    inventory.to_csv(INVENTORY_FILE, index=False)
+                    st.success(f"✅ {med_name} added successfully!")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- View Inventory ---
+        st.markdown("<div class='section-header'>📋 Current Inventory</div>", unsafe_allow_html=True)
+        with st.container():
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            if not inventory.empty:
+                st.dataframe(inventory, use_container_width=True)
+            else:
+                st.info("No medicines in inventory yet.")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- Remove Medicine ---
+        st.markdown("<div class='section-header'>🗑️ Remove Medicine</div>", unsafe_allow_html=True)
+        with st.container():
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            if not inventory.empty:
+                med_to_remove = st.selectbox("Select Medicine to Remove", inventory["Medicine"].unique())
+                if st.button("🗑️ Remove Selected"):
+                    inventory = inventory[inventory["Medicine"] != med_to_remove]
+                    inventory.to_csv(INVENTORY_FILE, index=False)
+                    st.success(f"✅ {med_to_remove} removed successfully!")
+            else:
+                st.info("No medicines available to remove.")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    except Exception as e:
+        st.error(f"⚠️ Could not read inventory: {e}")
+        st.info("Try deleting or fixing `inventory.csv` if the issue persists.")
