@@ -487,17 +487,7 @@ elif menu == "📦 Inventory":
                 st.dataframe(medicines, use_container_width=True)
             else:
                 st.info("No medicines in inventory yet.")
-
-            # --- Remove Medicine ---
-            st.markdown("<div class='section-header'>🗑️ Remove Medicine</div>", unsafe_allow_html=True)
-            if not medicines.empty:
-                med_to_remove = st.selectbox("Select Medicine to Remove", medicines["Ingredient"].unique())
-                if st.button("🗑️ Remove Selected Medicine"):
-                    medicines = medicines[medicines["Ingredient"] != med_to_remove]
-                    medicines.to_csv(INVENTORY_FILE, index=False)
-                    st.success(f"✅ {med_to_remove} removed successfully!")
-            else:
-                st.info("No medicines available to remove.")
+ 
 
         # -------------------------
         # 🛠️ Consumables Tab
@@ -562,17 +552,6 @@ elif menu == "📦 Inventory":
                 st.dataframe(consumables, use_container_width=True)
             else:
                 st.info("No consumables in inventory yet.")
-
-            # --- Remove Consumable ---
-            st.markdown("<div class='section-header'>🗑️ Remove Consumable</div>", unsafe_allow_html=True)
-            if not consumables.empty:
-                item_to_remove = st.selectbox("Select Consumable to Remove", consumables["Item Name"].unique())
-                if st.button("🗑️ Remove Selected Consumable"):
-                    consumables = consumables[consumables["Item Name"] != item_to_remove]
-                    consumables.to_csv(CONSUMABLES_FILE, index=False)
-                    st.success(f"✅ {item_to_remove} removed successfully!")
-            else:
-                st.info("No consumables available to remove.")
 
     except Exception as e:
         st.error(f"⚠️ Could not process inventory: {e}")
