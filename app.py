@@ -47,29 +47,12 @@ def set_background(image_file):
         unsafe_allow_html=True
     )
 
-# Example background
 set_background("bg1.jpg")
 
-# --- Logo Centered ---
+# --- Logo ---
 if os.path.exists("logo.png"):
     logo = Image.open("logo.png")
     st.image(logo, width=120)
-    st.markdown(
-        """
-        <style>
-        .logo-container {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 10px;
-        }
-        .logo-container img {
-            width: 180px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-    st.markdown('<div class="logo-container"><img src="logo.png"></div>', unsafe_allow_html=True)
 
 st.title("💊 Medicine Safety Comparator")
 
@@ -79,7 +62,7 @@ st.title("💊 Medicine Safety Comparator")
 with st.sidebar:
     st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
 
-    menu = st.radio("📌 Navigation", ["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
+    menu = st.radio("📌 Navigation", ["🏠 Home", "🧪 Testing", "📊 Dashboard", "📦 Inventory"])
 
     st.markdown("---")
     st.write("ℹ️ Version 1.0.0")
@@ -177,7 +160,6 @@ SAFETY_RULES = {
 }
 
 def suggest_improvements(values):
-    """Check competitor values against safety rules and suggest fixes."""
     suggestions = []
     for col, val in values.items():
         rule = SAFETY_RULES.get(col, {})
@@ -191,6 +173,67 @@ def suggest_improvements(values):
                 suggestions.append(f"Keep **{col}** within {low}-{high}.")
     return suggestions
 
+# ===============================
+# 🏠 Home Page
+# ===============================
+if menu == "🏠 Home":
+    st.markdown(
+        """
+        <div style="text-align: center; background-color: #D6EAF8; padding: 20px; border-radius: 10px;">
+            <h1 style="color: #2E86C1;">💊 Welcome to MedSafe AI</h1>
+            <h3 style="color: #117A65;">Your Medicine Safety Comparator</h3>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div style="background-color: #FDEBD0; padding: 15px; border-radius: 10px;">
+            <p style="font-size:16px; color:#B03A2E;">
+            MedSafe AI helps you **compare competitor medicines** with your standard medicines based on safety criteria. 
+            Quickly check which medicines are safe, identify areas for improvement, and generate professional PDF reports.
+            </p>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div style="display: flex; justify-content: space-around;">
+            <div style="background-color:#D5F5E3; padding:15px; border-radius:10px; width:30%; text-align:center;">
+                <h3 style="color:#145A32;">🧪 Testing</h3>
+                <p>Enter UPC or Active Ingredient and compare competitor medicines for safety.</p>
+            </div>
+            <div style="background-color:#FCF3CF; padding:15px; border-radius:10px; width:30%; text-align:center;">
+                <h3 style="color:#7D6608;">📊 Dashboard</h3>
+                <p>View usage logs, daily trends, and safety performance statistics.</p>
+            </div>
+            <div style="background-color:#F5B7B1; padding:15px; border-radius:10px; width:30%; text-align:center;">
+                <h3 style="color:#641E16;">📦 Inventory</h3>
+                <p>Browse your medicine dataset and analyze active ingredients distribution.</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=180)
+
+    st.markdown(
+        """
+        <div style="background-color:#E8DAEF; padding:15px; border-radius:10px; text-align:center;">
+            <p style="font-size:16px; color:#4A235A;">
+            ⚡ Tip: Start by navigating to the **Testing** tab to enter medicine details and generate safety reports.
+            </p>
+        </div>
+        """, unsafe_allow_html=True
+    )
 # ===============================
 # Pages
 # ===============================
