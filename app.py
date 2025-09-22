@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import plotly.express as px
+import plotly.graph_objects as go
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -365,39 +367,87 @@ if menu == "🧪 Testing":
 
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
-    st.header("📊 Performance Dashboard")
+    st.header("📊 Medicine Safety Analytics Dashboard")
 
     if os.path.exists(LOG_FILE):
         try:
-            logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")  # ✅ skip bad rows
+            logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")
             logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
 
-            st.subheader("Recent Usage Logs")
-            st.dataframe(logs.tail(10))
+            if not logs.empty:
+                # --- KPI Cards ---
+                total_tests = len(logs)
+                safe_count = logs["Result"].str.lower().eq("safe").sum()
+                unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
+                most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
 
-            st.subheader("Safety Prediction Summary")
-            if "Result" in logs.columns:
-                st.bar_chart(logs["Result"].value_counts())
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("🧪 Total Tests", total_tests)
+                col2.metric("✅ Safe", safe_count)
+                col3.metric("⚠️ Unsafe", unsafe_count)
+                col4.metric("🔥 Most Common Ingredient", most_common_ing)
 
-            st.subheader("Daily Usage Trend")
-            if "timestamp" in logs.columns:
-                daily_trend = logs.groupby(logs["timestamp"].dt.date).size()
-                st.line_chart(daily_trend)
+                st.markdown("---")
 
-            st.subheader("Most Frequently Compared Medicines")
-            if "Ingredient" in logs.columns:
-                st.bar_chart(logs["Ingredient"].value_counts().head(5))
+                # --- Competitor Safety Gauge ---
+                st.subheader("📊 Competitor Safety Rate")
+                safety_rate = (safe_count / total_tests * 100) if total_tests > 0 else 0
 
-            st.subheader("Competitor Safety Success Rate (%)")
-            if "Result" in logs.columns:
-                success_rate = (logs["Result"].value_counts(normalize=True) * 100).round(2)
-                st.dataframe(success_rate)
+                fig_gauge = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=safety_rate,
+                    title={"text": "Safety %"},
+                    gauge={
+                        "axis": {"range": [0, 100]},
+                        "bar": {"color": "green"},
+                        "steps": [
+                            {"range": [0, 40], "color": "red"},
+                            {"range": [40, 70], "color": "orange"},
+                            {"range": [70, 100], "color": "lightgreen"}
+                        ],
+                        "threshold": {
+                            "line": {"color": "black", "width": 4},
+                            "thickness": 0.75,
+                            "value": safety_rate
+                        }
+                    }
+                ))
+                st.plotly_chart(fig_gauge, use_container_width=True)
 
-            # --- 🗑️ Clear Logs Button ---
-            st.markdown("---")
-            if st.button("🗑️ Clear Logs"):
-                os.remove(LOG_FILE)
-                st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
+                st.markdown("---")
+
+                # --- Trend Over Time ---
+                st.subheader("📈 Daily Usage Trend")
+                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
+                fig_trend = px.line(daily_trend, x="timestamp", y="count", markers=True, title="Tests Over Time")
+                st.plotly_chart(fig_trend, use_container_width=True)
+
+                # --- Safe vs Unsafe Pie ---
+                st.subheader("🟢 Safe vs 🔴 Unsafe Distribution")
+                result_counts = logs["Result"].value_counts()
+                fig_pie = px.pie(values=result_counts.values, names=result_counts.index, hole=0.4)
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+                # --- Top Competitors ---
+                st.subheader("🏭 Top 5 Compared Competitors")
+                if "Competitor" in logs.columns:
+                    top_comp = logs["Competitor"].value_counts().head(5).reset_index()
+                    top_comp.columns = ["Competitor", "Count"]
+                    fig_bar = px.bar(top_comp, x="Competitor", y="Count", text="Count")
+                    st.plotly_chart(fig_bar, use_container_width=True)
+
+                # --- Recent Logs ---
+                st.subheader("📋 Recent Activity")
+                st.dataframe(logs.tail(10), use_container_width=True)
+
+                # --- Clear Logs Button ---
+                st.markdown("---")
+                if st.button("🗑️ Clear Logs"):
+                    os.remove(LOG_FILE)
+                    st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
+
+            else:
+                st.info("No data in logs yet. Run some comparisons first.")
 
         except Exception as e:
             st.error(f"⚠️ Could not read logs: {e}")
@@ -405,6 +455,7 @@ elif menu == "📊 Dashboard":
 
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
+
 
 
 # --- 📦 Inventory Page ---
