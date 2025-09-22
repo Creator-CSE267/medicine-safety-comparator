@@ -28,6 +28,7 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 # ===============================
 apply_theme()
 apply_layout_styles()
+apply_global_css()   # ✅ apply CSS globally
 
 # ===============================
 # Page Config
@@ -51,13 +52,17 @@ with st.sidebar:
     st.write("© 2025 MedSafe AI")
 
 # ===============================
-# Load dataset
+# File Paths
 # ===============================
-DATA_FILE = "medicine_dataset.csv"
-LOG_FILE = "usage_log.csv"
+MEDICINE_FILE = "medicine_dataset.csv"
 INVENTORY_FILE = "inventory.csv"
+CONSUMABLES_FILE = "consumables_dataset.csv"   # ✅ missing before
+LOG_FILE = "usage_log.csv"
 
-df = pd.read_csv(DATA_FILE, dtype={"UPC": str})
+# ===============================
+# Load Medicine Dataset
+# ===============================
+df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
 df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
 
 df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
