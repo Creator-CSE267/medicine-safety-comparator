@@ -391,174 +391,172 @@ elif menu == "📊 Dashboard":
 
 # --- 📦 Inventory Page ---
 elif menu == "📦 Inventory":
-    st.markdown("<div class='main-title'>📦 Inventory Management</div>", unsafe_allow_html=True)
+    st.markdown("<div class='main-title'>📦 Unified Inventory Management</div>", unsafe_allow_html=True)
 
-    # Define schema
-    INVENTORY_COLUMNS = ["UPC", "Ingredient", "Stock", "Expiry", "Manufacturer", "Batch"]
-
-    # Ensure inventory file exists with locked schema
+    # Ensure both files exist
     if not os.path.exists(INVENTORY_FILE):
-        pd.DataFrame(columns=INVENTORY_COLUMNS).to_csv(INVENTORY_FILE, index=False)
+        pd.DataFrame(columns=["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"]).to_csv(INVENTORY_FILE, index=False)
+    if not os.path.exists(CONSUMABLES_FILE):
+        pd.DataFrame(columns=[
+            "Item Name", "Category", "Material Type", "Sterility Level",
+            "Expiry Period (Months)", "Storage Temperature (C)", "Quantity in Stock",
+            "Usage Type", "Certification Standard", "UPC", "Safe/Not Safe"
+        ]).to_csv(CONSUMABLES_FILE, index=False)
 
     try:
-        # Load inventory
-        inventory = pd.read_csv(INVENTORY_FILE)
+        # Load datasets
+        medicines = pd.read_csv(INVENTORY_FILE)
+        consumables = pd.read_csv(CONSUMABLES_FILE)
 
-        # Force schema (add missing cols, drop extras)
-        for col in INVENTORY_COLUMNS:
-            if col not in inventory.columns:
-                inventory[col] = "" if col not in ["Stock"] else 0
-        inventory = inventory[INVENTORY_COLUMNS]
+        tab1, tab2 = st.tabs(["💊 Medicines", "🛠️ Consumables"])
 
-        # Load consumables
-        consumables = pd.read_csv("consumables_dataset.csv")
+        # -------------------------
+        # 💊 Medicines Tab
+        # -------------------------
+        with tab1:
+            st.markdown("<div class='section-header'>💊 Medicines Inventory</div>", unsafe_allow_html=True)
 
-        # --- Normalize Medicines ---
-        medicines_normalized = pd.DataFrame()
-        if not inventory.empty:
-            medicines_normalized = pd.DataFrame({
-                "UPC": inventory["UPC"],
-                "Name": inventory["Ingredient"],
-                "Type": "Medicine",
-                "Stock": inventory["Stock"],
-                "Expiry": inventory["Expiry"],
-                "Manufacturer": inventory["Manufacturer"],
-                "Batch": inventory["Batch"],
-                "Safe/Not Safe": "Safe",
-                "Extra Info": ""
-            })
-
-        # --- Normalize Consumables ---
-        consumables_normalized = pd.DataFrame()
-        if not consumables.empty:
-            consumables_normalized = pd.DataFrame({
-                "UPC": consumables["UPC"],
-                "Name": consumables["Item Name"],
-                "Type": consumables["Category"],
-                "Stock": consumables["Quantity in Stock"],
-                "Expiry": consumables["Expiry Period (Months)"].astype(str) + " months",
-                "Manufacturer": consumables["Certification Standard"],
-                "Batch": "",
-                "Safe/Not Safe": consumables["Safe/Not Safe"],
-                "Extra Info": consumables["Usage Type"]
-            })
-
-        # --- Merge both inventories ---
-        combined_inventory = pd.concat([medicines_normalized, consumables_normalized], ignore_index=True)
-
-        # --- KPI Cards ---
-        if not combined_inventory.empty:
-            total_items = combined_inventory["Name"].nunique()
-            total_stock = combined_inventory["Stock"].sum()
-            expiring_count = 0
-            if "Expiry" in combined_inventory.columns:
-                expiring_soon = combined_inventory[
-                    pd.to_datetime(combined_inventory["Expiry"], errors="coerce") <= pd.Timestamp.today() + pd.Timedelta(days=30)
+            # --- KPI Cards ---
+            if not medicines.empty:
+                total_meds = medicines["Ingredient"].nunique()
+                total_stock = medicines["Stock"].sum()
+                expiring_soon = medicines[
+                    pd.to_datetime(medicines["Expiry"], errors="coerce") <= pd.Timestamp.today() + pd.Timedelta(days=30)
                 ]
                 expiring_count = len(expiring_soon)
 
-            st.markdown("<div class='section-header'>📊 Inventory Overview</div>", unsafe_allow_html=True)
-            col1, col2, col3 = st.columns(3)
-            col1.metric("📦 Unique Items", total_items)
-            col2.metric("📦 Total Stock", total_stock)
-            col3.metric("⏳ Expiring Soon", expiring_count)
+                col1, col2, col3 = st.columns(3)
+                col1.metric("💊 Unique Medicines", total_meds)
+                col2.metric("📦 Total Stock", total_stock)
+                col3.metric("⏳ Expiring Soon", expiring_count)
 
-        # --- Add / Update Medicine ---
-        st.markdown("<div class='section-header'>➕ Add / Update Medicine</div>", unsafe_allow_html=True)
-        with st.form("add_medicine_form", clear_on_submit=True):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                upc = st.text_input("UPC")
-            with col2:
-                med_name = st.text_input("Ingredient")
-            with col3:
-                stock = st.number_input("Stock Quantity", min_value=1, step=1)
+            # --- Add Medicine ---
+            st.markdown("<div class='section-header'>➕ Add / Update Medicine</div>", unsafe_allow_html=True)
+            with st.form("add_medicine_form", clear_on_submit=True):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    upc = st.text_input("UPC")
+                with col2:
+                    med_name = st.text_input("Ingredient")
+                with col3:
+                    manufacturer = st.text_input("Manufacturer")
 
-            col4, col5, col6 = st.columns(3)
-            with col4:
-                manufacturer = st.text_input("Manufacturer")
-            with col5:
                 batch = st.text_input("Batch Number")
-            with col6:
+                stock = st.number_input("Stock Quantity", min_value=1, step=1)
                 expiry = st.date_input("Expiry Date")
 
-            # Auto-fill logic (UPC <-> Ingredient)
-            if upc and not med_name:
-                match = consumables[consumables["UPC"].astype(str) == str(upc)]
-                if not match.empty:
-                    med_name = match["Item Name"].values[0]
-                    st.info(f"🔄 Auto-filled Ingredient: {med_name}")
-
-            if med_name and not upc:
-                match = consumables[consumables["Item Name"].str.lower() == med_name.lower()]
-                if not match.empty:
-                    upc = match["UPC"].values[0]
-                    st.info(f"🔄 Auto-filled UPC: {upc}")
-
-            submitted = st.form_submit_button("➕ Save")
-            if submitted:
-                if med_name.strip():
-                    # --- Update stock if UPC exists
-                    if upc in inventory["UPC"].astype(str).values:
-                        inventory.loc[inventory["UPC"].astype(str) == str(upc), "Stock"] += stock
-                        st.success(f"✅ Stock updated for {med_name} (UPC: {upc})")
+                submitted = st.form_submit_button("💾 Save Medicine")
+                if submitted:
+                    if med_name.strip():
+                        # Check if same UPC + Batch exists → update stock
+                        mask = (medicines["UPC"] == upc) & (medicines["Batch"] == batch)
+                        if medicines[mask].empty:
+                            new_entry = pd.DataFrame([[upc, med_name, manufacturer, batch, stock, expiry]],
+                                                     columns=["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"])
+                            medicines = pd.concat([medicines, new_entry], ignore_index=True)
+                        else:
+                            medicines.loc[mask, "Stock"] += stock
+                            medicines.loc[mask, "Expiry"] = expiry
+                        medicines.to_csv(INVENTORY_FILE, index=False)
+                        st.success(f"✅ {med_name} saved successfully!")
                     else:
-                        new_entry = pd.DataFrame([[upc, med_name, stock, expiry, manufacturer, batch]],
-                                                 columns=INVENTORY_COLUMNS)
-                        inventory = pd.concat([inventory, new_entry], ignore_index=True)
-                        st.success(f"✅ {med_name} added successfully!")
+                        st.warning("⚠️ Please enter a valid medicine name.")
 
-                    # Save inventory with locked schema
-                    inventory.to_csv(INVENTORY_FILE, index=False)
+            # --- View Medicines ---
+            st.markdown("<div class='section-header'>📋 Current Medicines</div>", unsafe_allow_html=True)
+            if not medicines.empty:
+                st.dataframe(medicines, use_container_width=True)
+            else:
+                st.info("No medicines in inventory yet.")
 
-                    # Sync to consumables
-                    if upc in consumables["UPC"].astype(str).values:
-                        consumables.loc[consumables["UPC"].astype(str) == str(upc), "Quantity in Stock"] += stock
+            # --- Remove Medicine ---
+            st.markdown("<div class='section-header'>🗑️ Remove Medicine</div>", unsafe_allow_html=True)
+            if not medicines.empty:
+                med_to_remove = st.selectbox("Select Medicine to Remove", medicines["Ingredient"].unique())
+                if st.button("🗑️ Remove Selected Medicine"):
+                    medicines = medicines[medicines["Ingredient"] != med_to_remove]
+                    medicines.to_csv(INVENTORY_FILE, index=False)
+                    st.success(f"✅ {med_to_remove} removed successfully!")
+            else:
+                st.info("No medicines available to remove.")
+
+        # -------------------------
+        # 🛠️ Consumables Tab
+        # -------------------------
+        with tab2:
+            st.markdown("<div class='section-header'>🛠️ Consumables Inventory</div>", unsafe_allow_html=True)
+
+            # --- KPI Cards ---
+            if not consumables.empty:
+                total_items = consumables["Item Name"].nunique()
+                total_stock = consumables["Quantity in Stock"].sum()
+                expiring_items = consumables[
+                    pd.to_numeric(consumables["Expiry Period (Months)"], errors="coerce").fillna(0) <= 1
+                ]
+                expiring_count = len(expiring_items)
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("🛠️ Unique Items", total_items)
+                col2.metric("📦 Total Stock", total_stock)
+                col3.metric("⏳ Expiring Soon", expiring_count)
+
+            # --- Add Consumable ---
+            st.markdown("<div class='section-header'>➕ Add / Update Consumable</div>", unsafe_allow_html=True)
+            with st.form("add_consumable_form", clear_on_submit=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    item_name = st.text_input("Item Name")
+                    category = st.text_input("Category")
+                    material = st.text_input("Material Type")
+                    sterility = st.text_input("Sterility Level")
+                with col2:
+                    expiry_period = st.number_input("Expiry Period (Months)", min_value=0, step=1)
+                    storage_temp = st.number_input("Storage Temp (°C)", step=1)
+                    quantity = st.number_input("Quantity in Stock", min_value=1, step=1)
+                    upc = st.text_input("UPC")
+
+                usage_type = st.text_input("Usage Type")
+                cert = st.text_input("Certification Standard")
+                safe_status = st.selectbox("Safe/Not Safe", ["Safe", "Not Safe"])
+
+                submitted = st.form_submit_button("💾 Save Consumable")
+                if submitted:
+                    if item_name.strip():
+                        mask = (consumables["UPC"] == upc)
+                        if consumables[mask].empty:
+                            new_entry = pd.DataFrame([[item_name, category, material, sterility,
+                                                       expiry_period, storage_temp, quantity,
+                                                       usage_type, cert, upc, safe_status]],
+                                                     columns=consumables.columns)
+                            consumables = pd.concat([consumables, new_entry], ignore_index=True)
+                        else:
+                            consumables.loc[mask, "Quantity in Stock"] += quantity
+                            consumables.loc[mask, "Expiry Period (Months)"] = expiry_period
+                        consumables.to_csv(CONSUMABLES_FILE, index=False)
+                        st.success(f"✅ {item_name} saved successfully!")
                     else:
-                        new_row = {
-                            "Item Name": med_name,
-                            "Category": "Medicine",
-                            "Material Type": "",
-                            "Sterility Level": "",
-                            "Expiry Period (Months)": "",
-                            "Storage Temperature (C)": "",
-                            "Quantity in Stock": stock,
-                            "Usage Type": "",
-                            "Certification Standard": manufacturer,
-                            "UPC": upc,
-                            "Safe/Not Safe": "Safe"
-                        }
-                        consumables = pd.concat([consumables, pd.DataFrame([new_row])], ignore_index=True)
+                        st.warning("⚠️ Please enter a valid consumable name.")
 
-                    consumables.to_csv("consumables_dataset.csv", index=False)
+            # --- View Consumables ---
+            st.markdown("<div class='section-header'>📋 Current Consumables</div>", unsafe_allow_html=True)
+            if not consumables.empty:
+                st.dataframe(consumables, use_container_width=True)
+            else:
+                st.info("No consumables in inventory yet.")
 
-                else:
-                    st.warning("⚠️ Please enter a valid Ingredient.")
-
-        # --- View Inventory ---
-        st.markdown("<div class='section-header'>📋 Current Inventory</div>", unsafe_allow_html=True)
-        if not combined_inventory.empty:
-            st.dataframe(combined_inventory, use_container_width=True)
-        else:
-            st.info("No items in inventory yet.")
-
-        # --- Remove Item ---
-        st.markdown("<div class='section-header'>🗑️ Remove Item</div>", unsafe_allow_html=True)
-        if not inventory.empty:
-            med_to_remove = st.selectbox("Select Medicine to Remove", inventory["Ingredient"].unique())
-            if st.button("🗑️ Remove Selected"):
-                target_upc = inventory.loc[inventory["Ingredient"] == med_to_remove, "UPC"].values[0]
-                inventory = inventory[inventory["Ingredient"] != med_to_remove]
-                consumables = consumables[consumables["UPC"].astype(str) != str(target_upc)]
-
-                # Save back both files with locked schema
-                inventory.to_csv(INVENTORY_FILE, index=False)
-                consumables.to_csv("consumables_dataset.csv", index=False)
-
-                st.success(f"✅ {med_to_remove} removed successfully!")
-        else:
-            st.info("No medicines available to remove.")
+            # --- Remove Consumable ---
+            st.markdown("<div class='section-header'>🗑️ Remove Consumable</div>", unsafe_allow_html=True)
+            if not consumables.empty:
+                item_to_remove = st.selectbox("Select Consumable to Remove", consumables["Item Name"].unique())
+                if st.button("🗑️ Remove Selected Consumable"):
+                    consumables = consumables[consumables["Item Name"] != item_to_remove]
+                    consumables.to_csv(CONSUMABLES_FILE, index=False)
+                    st.success(f"✅ {item_to_remove} removed successfully!")
+            else:
+                st.info("No consumables available to remove.")
 
     except Exception as e:
         st.error(f"⚠️ Could not process inventory: {e}")
+        st.info("Try deleting or fixing the CSV files if the issue persists.")
+
 
