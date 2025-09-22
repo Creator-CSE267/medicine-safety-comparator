@@ -113,5 +113,26 @@ def apply_layout_styles():
             margin-bottom: 20px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.1);
         }
+
+        /* 🔹 KPI Cards */
+        .kpi-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            text-align: center;
+            margin: 10px;
+        }
+        .kpi-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #2E86C1;
+            margin-bottom: 8px;
+        }
+        .kpi-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #000000;
+        }
         </style>
     """, unsafe_allow_html=True)
