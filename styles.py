@@ -1,13 +1,14 @@
 # styles.py
 import streamlit as st
 import base64
+from PIL import Image
 import os
 
-# -------------------------------
-# 🎨 Theme + CSS Styling
-# -------------------------------
+# ===============================
+# Theme & Layout
+# ===============================
 def apply_theme():
-    # Initialize session state for theme persistence
+    """Initialize session state theme values."""
     if "theme_choice" not in st.session_state:
         st.session_state.theme_choice = "Light"
     if "custom_theme" not in st.session_state:
@@ -19,6 +20,8 @@ def apply_theme():
             "header_color": "#000000",
         }
 
+def apply_layout_styles():
+    """Sidebar theme selector + apply chosen theme CSS."""
     THEMES = {
         "Light": {
             "text_color": "#000000",
@@ -33,7 +36,7 @@ def apply_theme():
             "button_text": "#FFFFFF",
             "button_bg": "#444444",
             "header_color": "#FFFFFF",
-        },
+        }
     }
 
     # Sidebar theme selector
@@ -41,10 +44,8 @@ def apply_theme():
     theme_choice = st.sidebar.radio(
         "Choose Theme",
         ["Light", "Dark", "Custom"],
-        index=["Light", "Dark", "Custom"].index(st.session_state.theme_choice),
-        key="theme_selector"
+        index=["Light", "Dark", "Custom"].index(st.session_state.theme_choice)
     )
-
     st.session_state.theme_choice = theme_choice
 
     # Apply chosen theme
@@ -82,51 +83,44 @@ def apply_theme():
                 color: {THEME['button_text']} !important;
                 background-color: {THEME['button_bg']} !important;
             }}
-            .stDataFrame, .stTable {{
-                color: {THEME['text_color']} !important;
-            }}
             h1, h2, h3, h4, h5, h6 {{
                 color: {THEME['header_color']} !important;
             }}
         </style>
     """, unsafe_allow_html=True)
 
-
-# -------------------------------
-# 📐 Layout Styling
-# -------------------------------
-def apply_layout_styles():
+def apply_global_css():
+    """Extra global CSS for dashboard/inventory cards."""
     st.markdown("""
         <style>
-        .main-title {
-            text-align: center;
-            font-size: 2.2em;
-            font-weight: bold;
-            margin-bottom: 20px;
-        }
-        .section-header {
-            font-size: 1.4em;
-            font-weight: 600;
-            margin-top: 30px;
-            margin-bottom: 15px;
-            border-left: 5px solid #2E86C1;
-            padding-left: 10px;
-        }
-        .card {
-            background: #ffffff20;
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-        }
+            .main-title {
+                font-size: 28px;
+                font-weight: bold;
+                color: #2E86C1;
+                margin-bottom: 20px;
+            }
+            .section-header {
+                font-size: 20px;
+                font-weight: bold;
+                margin-top: 25px;
+                margin-bottom: 10px;
+                color: #34495E;
+            }
+            .card {
+                background: #f9f9f9;
+                padding: 15px;
+                border-radius: 12px;
+                margin-bottom: 15px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
         </style>
     """, unsafe_allow_html=True)
 
-
-# -------------------------------
-# 🌄 Background Styling
-# -------------------------------
+# ===============================
+# Background & Logo
+# ===============================
 def set_background(image_file):
+    """Set background image for app."""
     if not os.path.exists(image_file):
         return
     with open(image_file, "rb") as f:
@@ -149,26 +143,23 @@ def set_background(image_file):
         unsafe_allow_html=True
     )
 
-
-# -------------------------------
-# 🏥 Logo Styling
-# -------------------------------
-def show_logo(logo_path="logo.png"):
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=120)
+def show_logo(logo_file):
+    """Display logo centered if exists."""
+    if os.path.exists(logo_file):
+        st.image(Image.open(logo_file), width=120)
         st.markdown(
-            """
+            f"""
             <style>
-            .logo-container {
+            .logo-container {{
                 display: flex;
                 justify-content: center;
                 margin-bottom: 10px;
-            }
-            .logo-container img {
+            }}
+            .logo-container img {{
                 width: 180px;
-            }
+            }}
             </style>
             """,
             unsafe_allow_html=True
         )
-        st.markdown(f'<div class="logo-container"><img src="{logo_path}"></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="logo-container"><img src="{logo_file}"></div>', unsafe_allow_html=True)
