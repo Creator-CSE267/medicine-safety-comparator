@@ -146,20 +146,17 @@ def set_background(image_file):
 def show_logo(logo_file):
     """Display logo centered if exists."""
     if os.path.exists(logo_file):
-        st.image(Image.open(logo_file), width=120)
+        import base64
+        with open(logo_file, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode()
+
+        # Inject only one centered image
         st.markdown(
             f"""
-            <style>
-            .logo-container {{
-                display: flex;
-                justify-content: center;
-                margin-bottom: 10px;
-            }}
-            .logo-container img {{
-                width: 180px;
-            }}
-            </style>
+            <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+                <img src="data:image/png;base64,{encoded}" width="150">
+            </div>
             """,
             unsafe_allow_html=True
         )
-        st.markdown(f'<div class="logo-container"><img src="{logo_file}"></div>', unsafe_allow_html=True)
+
