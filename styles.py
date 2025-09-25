@@ -153,7 +153,7 @@ def show_logo(logo_file):
         # Inject only one centered image
         st.markdown(
             f"""
-            <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: center; margin-bottom: 10px;">
                 <img src="data:image/png;base64,{encoded}" width="250">
             </div>
             """,
