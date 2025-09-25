@@ -36,7 +36,7 @@ apply_global_css()   # ✅ apply CSS globally
 st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
 
 # Background + Logo
-set_background("bg4.jpg")
+set_background("bg1.jpg")
 show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
