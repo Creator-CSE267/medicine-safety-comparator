@@ -154,7 +154,7 @@ def show_logo(logo_file):
         st.markdown(
             f"""
             <div style="display: flex; justify-content: center; margin-bottom: 20px;">
-                <img src="data:image/png;base64,{encoded}" width="150">
+                <img src="data:image/png;base64,{encoded}" width="250">
             </div>
             """,
             unsafe_allow_html=True
