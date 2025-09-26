@@ -90,13 +90,14 @@ def apply_layout_styles():
     """, unsafe_allow_html=True)
 
 def apply_global_css():
-    """Extra global CSS for dashboard/inventory cards."""
+    """Extra global CSS for dashboard/inventory cards and form labels (dark style)."""
     st.markdown("""
         <style>
+            /* --- Titles and Sections --- */
             .main-title {
                 font-size: 28px;
                 font-weight: bold;
-                color: #2E86C1;
+                color: #111111;  /* Dark text */
                 margin-bottom: 20px;
             }
             .section-header {
@@ -104,7 +105,7 @@ def apply_global_css():
                 font-weight: bold;
                 margin-top: 25px;
                 margin-bottom: 10px;
-                color: #34495E;
+                color: #222222;  /* Darker text */
             }
             .card {
                 background: #f9f9f9;
@@ -113,8 +114,17 @@ def apply_global_css():
                 margin-bottom: 15px;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }
+
+            /* --- Form Labels (Text, Number, Date, Select etc.) --- */
+            label, .stTextInput label, .stNumberInput label, 
+            .stDateInput label, .stSelectbox label, .stTextArea label {
+                color: #111111 !important;   /* Dark black */
+                font-weight: 600 !important;
+                font-size: 16px !important;
+            }
         </style>
     """, unsafe_allow_html=True)
+
 
 # ===============================
 # Background & Logo
