@@ -367,12 +367,13 @@ doc.build(elements)
 buffer.seek(0)
 
 # --- Streamlit Download Button ---
-        st.download_button(
+             st.download_button(
          label="⬇ Download PDF Report",
          data=buffer,
          file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
          mime="application/pdf"
-        )
+     )
+
 
 
 # --- 📊 Dashboard Page ---
