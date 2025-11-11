@@ -302,12 +302,11 @@ insert_log(
     result=log_entry["Result"]
 )
 
-
-            # --- PDF Report Download ---
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-            from reportlab.lib.styles import getSampleStyleSheet
-            from reportlab.lib.pagesizes import A4
-            import io
+# --- PDF Report Download ---
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+import io
 
             buffer = io.BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=A4)
