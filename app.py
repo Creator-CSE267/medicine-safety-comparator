@@ -19,6 +19,100 @@ import io
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+# ===============================
+# ✅ SQLite Database Integration (Added without removing CSV)
+# ===============================
+import sqlite3
+
+DB_PATH = "medsafe.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Medicines table
+    cursor.execute('''CREATE TABLE IF NOT EXISTS medicines (
+        UPC TEXT,
+        Ingredient TEXT,
+        Manufacturer TEXT,
+        Batch TEXT,
+        Stock INTEGER,
+        Expiry TEXT
+    )''')
+
+    # Consumables table
+    cursor.execute('''CREATE TABLE IF NOT EXISTS consumables (
+        ItemName TEXT,
+        Category TEXT,
+        MaterialType TEXT,
+        SterilityLevel TEXT,
+        ExpiryPeriod INTEGER,
+        StorageTemp INTEGER,
+        Quantity INTEGER,
+        UsageType TEXT,
+        Certification TEXT,
+        UPC TEXT,
+        SafeStatus TEXT
+    )''')
+
+    # Logs table
+    cursor.execute('''CREATE TABLE IF NOT EXISTS logs (
+        timestamp TEXT,
+        UPC TEXT,
+        Ingredient TEXT,
+        Competitor TEXT,
+        Result TEXT
+    )''')
+
+    conn.commit()
+    conn.close()
+
+def insert_log(upc, ingredient, competitor, result):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO logs VALUES (?, ?, ?, ?, ?)",
+                   (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), upc, ingredient, competitor, result))
+    conn.commit()
+    conn.close()
+
+def insert_medicine(upc, ingredient, manufacturer, batch, stock, expiry):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO medicines VALUES (?, ?, ?, ?, ?, ?)",
+                   (upc, ingredient, manufacturer, batch, stock, str(expiry)))
+    conn.commit()
+    conn.close()
+
+def insert_consumable(item, category, material, sterility, expiry_period, storage_temp,
+                      quantity, usage_type, certification, upc, safe_status):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO consumables VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   (item, category, material, sterility, expiry_period, storage_temp,
+                    quantity, usage_type, certification, upc, safe_status))
+    conn.commit()
+    conn.close()
+
+def fetch_logs():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT * FROM logs", conn)
+    conn.close()
+    return df
+
+def fetch_medicines():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT * FROM medicines", conn)
+    conn.close()
+    return df
+
+def fetch_consumables():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT * FROM consumables", conn)
+    conn.close()
+    return df
+
+# Initialize DB at startup
+init_db()
 
 # Import custom styles
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
@@ -58,34 +152,12 @@ MEDICINE_FILE = "medicine_dataset.csv"
 INVENTORY_FILE = "inventory.csv"
 CONSUMABLES_FILE = "consumables_dataset.csv"   # ✅ missing before
 LOG_FILE = "usage_log.csv"
-# ===============================
-# Database (SQLite via db.py)
-# ===============================
-from db import (
-    init_db,
-    fetch_all_medicines, fetch_all_consumables,
-    upsert_medicine, upsert_consumable,
-    append_log, fetch_recent_logs,
-    find_medicine_by_upc, find_medicine_by_ingredient
-)
-
-# Initialize DB and tables (creates medsafe.db if missing)
-init_db()
 
 # ===============================
 # Load Medicine Dataset
 # ===============================
-# Load medicine dataset from DB (fallback → CSV if DB empty)
-df = fetch_all_medicines()
-if df is None or df.empty:
-    if os.path.exists(MEDICINE_FILE):
-        df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
-        df["UPC"] = df["UPC"].astype(str).str.split(".").str[0].str.strip()
-    else:
-        df = pd.DataFrame(columns=[
-            "UPC", "Active Ingredient", "Disease/Use Case", "Safe/Not Safe"
-        ])
-
+df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
+df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
 
 df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
 if "Disease/Use Case" not in df.columns:
@@ -282,6 +354,10 @@ if menu == "🧪 Testing":
                 log_df.to_csv(LOG_FILE, index=False)
             else:
                 log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+            # ✅ Also save to SQLite
+insert_log(upc_input, ingredient_input, comp_name, result)
+st.info("📀 Log saved to database as well!")
+
 
             # --- PDF Report Download ---
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
@@ -359,59 +435,98 @@ elif menu == "📊 Dashboard":
     apply_global_css()   # ✅ apply styling
     st.markdown("<div class='main-title'>📊 Medicine Safety Analytics Dashboard</div>", unsafe_allow_html=True)
 
-    if os.path.exists(LOG_FILE):
-        try:
-            logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")
-            logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
+if os.path.exists(LOG_FILE):
+    try:
+        logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")
+        logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
 
-            if not logs.empty:
-                # --- KPI Cards ---
-                total_tests = len(logs)
-                safe_count = logs["Result"].str.lower().eq("safe").sum()
-                unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
-                most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
+        if not logs.empty:
+            # --- KPI Cards ---
+            total_tests = len(logs)
+            safe_count = logs["Result"].str.lower().eq("safe").sum()
+            unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
+            most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
 
-                st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("🧪 Total Tests", total_tests)
-                col2.metric("✅ Safe", safe_count)
-                col3.metric("⚠ Unsafe", unsafe_count)
-                col4.metric("🔥 Top Ingredient", most_common_ing)
+            st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("🧪 Total Tests", total_tests)
+            col2.metric("✅ Safe", safe_count)
+            col3.metric("⚠ Unsafe", unsafe_count)
+            col4.metric("🔥 Top Ingredient", most_common_ing)
 
-                # --- Trend Over Time ---
-                st.markdown("<div class='section-header'>📈 Usage Trend Over Time</div>", unsafe_allow_html=True)
-                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
-                fig_trend = px.line(
-                    daily_trend, x="timestamp", y="count",
-                    markers=True,
-                    title="Tests Conducted Per Day"
-                )
-                fig_trend.update_traces(line=dict(width=3, color="#2E86C1"))
-                fig_trend.update_layout(title_x=0.5)
-                st.plotly_chart(fig_trend, use_container_width=True)
+            # --- Trend Over Time ---
+            st.markdown("<div class='section-header'>📈 Usage Trend Over Time</div>", unsafe_allow_html=True)
+            daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
+            fig_trend = px.line(
+                daily_trend, x="timestamp", y="count",
+                markers=True,
+                title="Tests Conducted Per Day"
+            )
+            fig_trend.update_traces(line=dict(width=3, color="#2E86C1"))
+            fig_trend.update_layout(title_x=0.5)
+            st.plotly_chart(fig_trend, use_container_width=True)
 
-                # --- Recent Logs ---
-                st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
-                st.dataframe(
-                    logs.tail(10)[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]],
-                    use_container_width=True
-                )
+            # --- Recent Logs ---
+            st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
+            st.dataframe(
+                logs.tail(10)[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]],
+                use_container_width=True
+            )
 
-                # --- Clear Logs Button ---
-                st.markdown("<div class='section-header'>🗑 Manage Logs</div>", unsafe_allow_html=True)
-                if st.button("🗑 Clear Logs"):
-                    os.remove(LOG_FILE)
-                    st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
+            # --- Clear Logs Button ---
+            st.markdown("<div class='section-header'>🗑 Manage Logs</div>", unsafe_allow_html=True)
+            if st.button("🗑 Clear Logs"):
+                os.remove(LOG_FILE)
+                st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
 
-            else:
-                st.info("No data in logs yet. Run some comparisons first.")
+        else:
+            st.info("No data in logs yet. Run some comparisons first.")
 
-        except Exception as e:
-            st.error(f"⚠ Could not read logs: {e}")
-            st.info("Try clearing or deleting usage_log.csv if the issue persists.")
+    except Exception as e:
+        st.error(f"⚠ Could not read logs: {e}")
+        st.info("Try clearing or deleting usage_log.csv if the issue persists.")
 
+else:
+    st.info("No logs yet. Run some comparisons to see dashboard data.")
+
+
+# ===============================
+# ✅ NEW: Show Logs from SQLite Database
+# ===============================
+import sqlite3
+DB_PATH = "medsafe.db"
+
+try:
+    conn = sqlite3.connect(DB_PATH)
+    db_logs = pd.read_sql_query("SELECT * FROM logs", conn)
+    conn.close()
+
+    if not db_logs.empty:
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown("<div class='section-header'>🗂 Logs Stored in Database</div>", unsafe_allow_html=True)
+
+        # Convert timestamp to datetime
+        db_logs["timestamp"] = pd.to_datetime(db_logs["timestamp"], errors="coerce")
+
+        # KPIs from DB
+        total_db_logs = len(db_logs)
+        safe_db = db_logs["Result"].str.lower().eq("safe").sum()
+        unsafe_db = db_logs["Result"].str.lower().eq("not safe").sum()
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("💾 DB Logs Total", total_db_logs)
+        col2.metric("✅ Safe (DB)", safe_db)
+        col3.metric("⚠ Not Safe (DB)", unsafe_db)
+
+        # Display last 10 DB logs
+        st.dataframe(db_logs.tail(10)[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]],
+                     use_container_width=True)
     else:
-        st.info("No logs yet. Run some comparisons to see dashboard data.")
+        st.info("📭 No data yet in database logs. Run some tests first.")
+
+except Exception as e:
+    st.warning(f"⚠ Could not load database logs: {e}")
+
 
 
 
