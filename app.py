@@ -262,220 +262,184 @@ def suggest_improvements(values):
 # ===============================
 
 # --- 🧪 Testing Page ---
+# --- 🧪 Testing Page ---
 if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
-    st.subheader("🔍 Search by UPC or Active Ingredient (Camera / Upload supported)")
+    st.markdown("### 🔍 Scan or Enter Medicine Details")
 
-    # Initialize variables
+    # ===============================
+    # 🔹 Step 1: Barcode / QR Scanning Section
+    # ===============================
+    st.markdown("#### 📸 Scan Medicine Barcode / QR Code")
+
+    col_cam, col_upload = st.columns([2, 1])
+
     upc_input = ""
     ingredient_input = ""
 
-    # Barcode scanner UI
-    col_cam, col_manual = st.columns([2, 1])
-
     with col_cam:
-        st.markdown("**Use device camera to scan barcode / QR**")
-        cam_img = st.camera_input("Tap to open camera (browser/mobile)")
+        cam_img = st.camera_input("Use your webcam / phone camera to scan the medicine barcode")
         if cam_img is not None:
             bytes_data = cam_img.getvalue()
             codes = decode_barcodes_from_bytes(bytes_data)
             if codes:
                 detected_upc = codes[0]["data"]
                 detected_type = codes[0]["type"]
-                st.success(f"Detected ({detected_type}): {detected_upc}")
+                st.success(f"✅ Detected ({detected_type}): {detected_upc}")
                 upc_input = detected_upc
             else:
-                st.info("No barcode/QR detected in the photo. Try a clearer photo or upload an image.")
+                st.info("No barcode/QR detected — try again with better lighting.")
 
-    with col_manual:
-        st.markdown("**Or upload an image with barcode**")
-        uploaded_file = st.file_uploader("Upload barcode image (PNG/JPG)", type=["png", "jpg", "jpeg"])
+    with col_upload:
+        st.markdown("**Or upload a barcode / QR image**")
+        uploaded_file = st.file_uploader("Upload image (PNG, JPG, JPEG)", type=["png", "jpg", "jpeg"])
         if uploaded_file is not None:
             bytes_data = uploaded_file.read()
             codes = decode_barcodes_from_bytes(bytes_data)
             if codes:
                 detected_upc = codes[0]["data"]
                 detected_type = codes[0]["type"]
-                st.success(f"Detected ({detected_type}) from upload: {detected_upc}")
+                st.success(f"✅ Detected ({detected_type}) from upload: {detected_upc}")
                 upc_input = detected_upc
             else:
-                st.warning("No barcode/QR found in the uploaded image.")
+                st.warning("No barcode detected in the uploaded image.")
 
-    # Text fallback / override
-    upc_input = st.text_input("UPC (camera will auto-fill if detected)", value=upc_input)
-    ingredient_input = st.text_input("Enter Active Ingredient:", value=ingredient_input)
+    # Manual fallback input (auto-filled if barcode found)
+    upc_input = st.text_input("🧾 UPC (auto-filled if scanned)", value=upc_input)
+    ingredient_input = st.text_input("💊 Active Ingredient (optional)", value=ingredient_input)
 
+    # ===============================
+    # 🔹 Step 2: Auto-lookup medicine by UPC / Ingredient
+    # ===============================
     selected_row = None
-    if upc_input and not df.empty:
+    if upc_input:
         match = df[df["UPC"].astype(str) == str(upc_input)]
         if not match.empty:
             selected_row = match.iloc[0]
-            ingredient_input = selected_row.get("Active Ingredient", ingredient_input)
+            ingredient_input = selected_row.get("Active Ingredient", "Unknown")
             st.success(f"✅ UPC found → Active Ingredient: {ingredient_input}")
         else:
-            st.error("❌ UPC not found in dataset.")
-    elif ingredient_input and not df.empty and (not upc_input):
+            st.warning("⚠️ UPC not found in dataset. You may enter ingredient manually.")
+    elif ingredient_input:
         match = df[df["Active Ingredient"].str.lower() == ingredient_input.lower()]
         if not match.empty:
             selected_row = match.iloc[0]
-            upc_input = selected_row.get("UPC", upc_input)
+            upc_input = selected_row.get("UPC", "")
             st.success(f"✅ Ingredient found → UPC: {upc_input}")
-        else:
-            st.error("❌ Ingredient not found in dataset.")
 
-    st.subheader("🏭 Competitor Medicine Entry")
+    # ===============================
+    # 🔹 Step 3: Competitor Medicine Entry
+    # ===============================
+    st.subheader("🏭 Competitor Medicine Details")
+
     comp_name = st.text_input("Competitor Name")
     comp_gst = st.text_input("GST Number")
     comp_address = st.text_area("Address")
     comp_phone = st.text_input("Phone Number")
 
+    st.markdown("### ⚙️ Enter Competitor Medicine Test Parameters")
     competitor_values = {}
     for col in numeric_cols:
         competitor_values[col] = st.number_input(f"{col}:", value=0.0)
 
+    # ===============================
+    # 🔹 Step 4: Compare and Generate Results
+    # ===============================
     if st.button("🔎 Compare"):
         if selected_row is None:
-            st.error("⚠️ Please enter a valid UPC or Ingredient first.")
+            st.error("⚠️ Please scan or enter a valid UPC / Ingredient first.")
         else:
+            # Prepare input for model
             input_data = {"Active Ingredient": ingredient_input, "Disease/Use Case": "Unknown"}
             for col in numeric_cols:
                 input_data[col] = competitor_values[col]
+
             competitor_df = pd.DataFrame([input_data])
+            pred = model.predict(competitor_df)[0]
+            result = le.inverse_transform([pred])[0]
 
-            if model is None:
-                st.error("⚠️ Model not available (training failed or dataset missing).")
+            # Comparison chart
+            base_values = [selected_row[col] for col in numeric_cols]
+            comp_values = [competitor_values[col] for col in numeric_cols]
+
+            st.success(f"✅ Competitor Prediction: {result}")
+
+            # Display competitor info
+            st.markdown(f"**🏭 Competitor:** {comp_name} | **GST:** {comp_gst} | **📞 Phone:** {comp_phone}")
+            st.markdown(f"**📍 Address:** {comp_address}")
+
+            # --- Comparison chart ---
+            x = np.arange(len(numeric_cols))
+            width = 0.35
+            fig, ax = plt.subplots(figsize=(12, 6))
+            ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
+            ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
+            ax.set_xticks(x)
+            ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
+            ax.set_title("Medicine Criteria Comparison")
+            ax.legend()
+            st.pyplot(fig)
+
+            # --- Safety check ---
+            if result.lower() == "not safe":
+                st.error("⚠️ Competitor medicine is NOT SAFE.")
+                suggestions = suggest_improvements(competitor_values)
+                if suggestions:
+                    st.markdown("### 🔧 Suggested Improvements")
+                    for s in suggestions:
+                        st.write(f"- {s}")
             else:
-                try:
-                    pred = model.predict(competitor_df)[0]
-                    result = le.inverse_transform([pred])[0]
-                except Exception as e:
-                    st.error(f"Prediction failed: {e}")
-                    result = "Unknown"
+                st.success("✅ Competitor medicine meets safety parameters.")
 
-                base_values = [selected_row.get(col, 0) for col in numeric_cols]
-                comp_values = [competitor_values[col] for col in numeric_cols]
+            # --- Logging ---
+            log_entry = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "UPC": upc_input,
+                "Ingredient": ingredient_input,
+                "Competitor": comp_name,
+                "Result": result
+            }
+            log_df = pd.DataFrame([log_entry])
+            if not os.path.exists(LOG_FILE):
+                log_df.to_csv(LOG_FILE, index=False)
+            else:
+                log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
 
-                st.success(f"✅ Competitor Prediction: {result}")
+            # --- PDF Report ---
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            styles = getSampleStyleSheet()
+            elements = []
 
-                # Show competitor details
-                st.markdown(f"**🏭 Competitor:** {comp_name} | **GST:** {comp_gst} | **Phone:** {comp_phone}")
-                st.markdown(f"**📍 Address:** {comp_address}")
+            if os.path.exists("logo.png"):
+                elements.append(RLImage("logo.png", width=100, height=100))
+                elements.append(Spacer(1, 12))
 
-                # Comparison chart
-                x = np.arange(len(numeric_cols))
-                width = 0.35
-                fig, ax = plt.subplots(figsize=(12, 6))
-                ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
-                ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
-                ax.set_xticks(x)
-                ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
-                ax.set_title("Medicine Criteria Comparison")
-                ax.legend()
-                st.pyplot(fig)
+            elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
+            elements.append(Spacer(1, 12))
+            elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+            elements.append(Paragraph(f"<b>UPC:</b> {upc_input}", styles["Normal"]))
+            elements.append(Paragraph(f"<b>Ingredient:</b> {ingredient_input}", styles["Normal"]))
+            elements.append(Paragraph(f"<b>Competitor:</b> {comp_name}", styles["Normal"]))
+            elements.append(Paragraph(f"<b>Result:</b> {result}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
 
-                # Suggestions if unsafe
-                suggestions = []
-                if isinstance(result, str) and result.lower() == "not safe":
-                    st.error("⚠️ Competitor medicine is NOT SAFE.")
-                    suggestions = suggest_improvements(competitor_values)
-                    if suggestions:
-                        st.markdown("### 🔧 Suggested Improvements")
-                        for s in suggestions:
-                            st.write(f"- {s}")
+            chart_buffer = io.BytesIO()
+            fig.savefig(chart_buffer, format="png")
+            chart_buffer.seek(0)
+            elements.append(RLImage(chart_buffer, width=400, height=250))
 
-                # Log
-                log_entry = {
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "UPC": upc_input,
-                    "Ingredient": ingredient_input,
-                    "Competitor": comp_name,
-                    "Result": result
-                }
-                log_df = pd.DataFrame([log_entry])
-                try:
-                    if not os.path.exists(LOG_FILE):
-                        log_df.to_csv(LOG_FILE, index=False)
-                    else:
-                        log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
-                except Exception as e:
-                    st.warning(f"Could not write log: {e}")
+            doc.build(elements)
+            buffer.seek(0)
 
-                # --- PDF Report Download ---
-                buffer = io.BytesIO()
-                # Use temporary image file for chart
-                try:
-                    import tempfile
-                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                        fig.savefig(tmp.name, format='png', bbox_inches='tight')
-                        tmp_path = tmp.name
+            st.download_button(
+                label="⬇️ Download PDF Report",
+                data=buffer,
+                file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf"
+            )
 
-                    doc = SimpleDocTemplate(buffer, pagesize=A4)
-                    styles = getSampleStyleSheet()
-                    elements = []
-
-                    # --- Add Logo ---
-                    if os.path.exists("logo.png"):
-                        elements.append(RLImage("logo.png", width=100, height=100))
-                        elements.append(Spacer(1, 12))
-
-                    # --- Title & Date ---
-                    elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
-                    elements.append(Spacer(1, 12))
-                    elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
-                    elements.append(Spacer(1, 12))
-
-                    # --- Standard Medicine ---
-                    elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
-                    elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
-                    elements.append(Paragraph(f"Ingredient: {ingredient_input}", styles["Normal"]))
-                    elements.append(Spacer(1, 12))
-
-                    # --- Competitor Medicine ---
-                    elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
-                    elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
-                    elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
-                    elements.append(Paragraph(f"Address: {comp_address}", styles["Normal"]))
-                    elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
-                    elements.append(Spacer(1, 12))
-
-                    # --- Prediction ---
-                    elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-                    if isinstance(result, str) and result.lower() == "safe":
-                        elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
-                    else:
-                        elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
-                    elements.append(Spacer(1, 12))
-
-                    # --- Suggestions if Not Safe ---
-                    if isinstance(result, str) and result.lower() == "not safe" and suggestions:
-                        elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
-                        for s in suggestions:
-                            elements.append(Paragraph(f"- {s}", styles["Normal"]))
-                        elements.append(Spacer(1, 12))
-
-                    # --- Add Comparison Chart ---
-                    try:
-                        elements.append(RLImage(tmp_path, width=400, height=250))
-                        elements.append(Spacer(1, 12))
-                    except Exception:
-                        pass
-
-                    # --- Build PDF ---
-                    doc.build(elements)
-                    buffer.seek(0)
-                except Exception as e:
-                    st.warning(f"Could not build PDF chart: {e}")
-
-                # --- Streamlit Download Button ---
-                try:
-                    st.download_button(
-                        label="⬇️ Download PDF Report",
-                        data=buffer,
-                        file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                        mime="application/pdf"
-                    )
-                except Exception as e:
-                    st.warning(f"Could not create download button: {e}")
 
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
