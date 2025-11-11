@@ -20,13 +20,23 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 
-# Barcode decoding imports
 try:
+    # Try ZXing first — works on Streamlit Cloud (no zbar dependency)
     from pyzxing import BarCodeReader
-reader = BarCodeReader()
+    reader = BarCodeReader()
+    USE_PYZXING = True
+    st.info("✅ Using pyzxing for barcode decoding (cloud-safe).")
 except Exception:
-    pyzbar_decode = None
-import numpy as _np  # alias to avoid conflict with existing np import (for PIL->array)
+    try:
+        # Fallback to pyzbar (requires zbar installed locally)
+        from pyzbar.pyzbar import decode as pyzbar_decode
+        USE_PYZXING = False
+        st.info("✅ Using pyzbar for barcode decoding (local mode).")
+    except Exception as e:
+        st.error(f"⚠️ No barcode library available: {e}")
+        pyzbar_decode = None
+        reader = None
+        USE_PYZXING = None
 
 # Import custom styles
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
@@ -44,47 +54,58 @@ import io
 
 def decode_barcodes_from_bytes(img_bytes):
     """
-    Enhanced barcode/QR decoder for Streamlit camera_input.
-    - Converts to grayscale
-    - Increases contrast & sharpness
-    - Tries multiple decode passes (original + 2x resized)
-    Returns: list of {"data": str, "type": str}
+    Universal barcode/QR decoder for Streamlit.
+    Works with:
+      - pyzxing (no native libs, cloud-safe)
+      - pyzbar (requires zbar installed)
     """
+    import io, os, uuid, tempfile
+    from PIL import Image
+
     try:
-        # Load and preprocess image
-        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        gray = ImageOps.grayscale(image)
+        if USE_PYZXING:
+            # --- Decode using pyzxing ---
+            tmp_name = f"/tmp/{uuid.uuid4().hex}.png"
+            image = Image.open(io.BytesIO(img_bytes))
+            image.save(tmp_name)
+            results = reader.decode(tmp_name)
+            os.remove(tmp_name)
 
-        # Enhance contrast and sharpness
-        contrast = ImageEnhance.Contrast(gray).enhance(2.0)
-        sharp = ImageEnhance.Sharpness(contrast).enhance(2.0)
+            output = []
+            if results:
+                for r in results:
+                    if "parsed" in r:
+                        output.append({
+                            "data": r["parsed"],
+                            "type": r.get("format", "Unknown")
+                        })
+            return output
 
-        # Convert to numpy
-        arr = np.array(sharp)
+        elif pyzbar_decode:
+            # --- Decode using pyzbar ---
+            from PIL import ImageEnhance, ImageOps
+            image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            gray = ImageOps.grayscale(image)
+            contrast = ImageEnhance.Contrast(gray).enhance(2.0)
+            sharp = ImageEnhance.Sharpness(contrast).enhance(2.0)
+            arr = np.array(sharp)
+            decoded = pyzbar_decode(arr)
 
-        # First decode attempt
-        decoded = pyzbar_decode(arr)
+            results = []
+            for d in decoded:
+                try:
+                    data = d.data.decode("utf-8")
+                except Exception:
+                    data = str(d.data)
+                results.append({"data": data.strip(), "type": d.type})
+            return results
 
-        # Second attempt on enlarged version if nothing found
-        if not decoded:
-            resized = sharp.resize((sharp.width * 2, sharp.height * 2))
-            decoded = pyzbar_decode(np.array(resized))
-
-        results = []
-        for d in decoded:
-            try:
-                data = d.data.decode("utf-8")
-            except Exception:
-                data = str(d.data)
-            results.append({"data": data.strip(), "type": d.type})
-
-        # Debug info (optional)
-        if not results:
-            st.info("No barcode/QR found — try closer, clearer photo.")
-        return results
+        else:
+            st.error("⚠️ No decoding backend available. Install pyzxing or pyzbar.")
+            return []
 
     except Exception as e:
-        st.warning(f"⚠️ Decode error: {e}")
+        st.error(f"⚠️ Barcode decode error: {e}")
         return []
 
 
