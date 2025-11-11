@@ -33,28 +33,59 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 # ===============================
 # Helper: decode barcodes from image bytes
 # ===============================
+# ===============================
+# Helper: decode barcodes from image bytes (Enhanced for Streamlit)
+# ===============================
+from pyzbar.pyzbar import decode as pyzbar_decode
+from PIL import Image, ImageEnhance, ImageOps
+import numpy as np
+import io
+
 def decode_barcodes_from_bytes(img_bytes):
     """
-    Accepts image bytes (from Streamlit st.camera_input or st.file_uploader),
-    returns list of decoded barcode/QR dicts: [{"data": str, "type": str}, ...]
-    If pyzbar not available, returns empty list.
+    Enhanced barcode/QR decoder for Streamlit camera_input.
+    - Converts to grayscale
+    - Increases contrast & sharpness
+    - Tries multiple decode passes (original + 2x resized)
+    Returns: list of {"data": str, "type": str}
     """
-    if pyzbar_decode is None:
-        return []
     try:
+        # Load and preprocess image
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    except Exception:
+        gray = ImageOps.grayscale(image)
+
+        # Enhance contrast and sharpness
+        contrast = ImageEnhance.Contrast(gray).enhance(2.0)
+        sharp = ImageEnhance.Sharpness(contrast).enhance(2.0)
+
+        # Convert to numpy
+        arr = np.array(sharp)
+
+        # First decode attempt
+        decoded = pyzbar_decode(arr)
+
+        # Second attempt on enlarged version if nothing found
+        if not decoded:
+            resized = sharp.resize((sharp.width * 2, sharp.height * 2))
+            decoded = pyzbar_decode(np.array(resized))
+
+        results = []
+        for d in decoded:
+            try:
+                data = d.data.decode("utf-8")
+            except Exception:
+                data = str(d.data)
+            results.append({"data": data.strip(), "type": d.type})
+
+        # Debug info (optional)
+        if not results:
+            st.info("No barcode/QR found — try closer, clearer photo.")
+        return results
+
+    except Exception as e:
+        st.warning(f"⚠️ Decode error: {e}")
         return []
-    arr = _np.array(image)
-    decoded = pyzbar_decode(arr)
-    results = []
-    for d in decoded:
-        try:
-            data = d.data.decode("utf-8")
-        except Exception:
-            data = d.data
-        results.append({"data": data, "type": d.type})
-    return results
+
 
 # ===============================
 # Apply Styles
