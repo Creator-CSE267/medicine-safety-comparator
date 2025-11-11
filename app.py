@@ -20,8 +20,41 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 
+# Barcode decoding imports
+try:
+    from pyzbar.pyzbar import decode as pyzbar_decode
+except Exception:
+    pyzbar_decode = None
+import numpy as _np  # alias to avoid conflict with existing np import (for PIL->array)
+
 # Import custom styles
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
+
+# ===============================
+# Helper: decode barcodes from image bytes
+# ===============================
+def decode_barcodes_from_bytes(img_bytes):
+    """
+    Accepts image bytes (from Streamlit st.camera_input or st.file_uploader),
+    returns list of decoded barcode/QR dicts: [{"data": str, "type": str}, ...]
+    If pyzbar not available, returns empty list.
+    """
+    if pyzbar_decode is None:
+        return []
+    try:
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    except Exception:
+        return []
+    arr = _np.array(image)
+    decoded = pyzbar_decode(arr)
+    results = []
+    for d in decoded:
+        try:
+            data = d.data.decode("utf-8")
+        except Exception:
+            data = d.data
+        results.append({"data": data, "type": d.type})
+    return results
 
 # ===============================
 # Apply Styles
@@ -60,12 +93,26 @@ CONSUMABLES_FILE = "consumables_dataset.csv"   # ✅ missing before
 LOG_FILE = "usage_log.csv"
 
 # ===============================
-# Load Medicine Dataset
+# Load Medicine Dataset (safe)
 # ===============================
-df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
-df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
+if os.path.exists(MEDICINE_FILE):
+    try:
+        df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
+        if "UPC" in df.columns:
+            df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
+    except Exception as e:
+        st.error(f"Could not read {MEDICINE_FILE}: {e}")
+        df = pd.DataFrame()
+else:
+    st.warning(f"{MEDICINE_FILE} not found. Create the CSV and refresh.")
+    df = pd.DataFrame()
 
-df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
+# Ensure necessary columns exist with safe defaults
+if "Active Ingredient" not in df.columns:
+    df["Active Ingredient"] = "Unknown"
+else:
+    df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
+
 if "Disease/Use Case" not in df.columns:
     df["Disease/Use Case"] = "Unknown"
 else:
@@ -74,19 +121,8 @@ else:
 if "Safe/Not Safe" not in df.columns:
     df["Safe/Not Safe"] = "Safe"
 
-y = df["Safe/Not Safe"]
+# Prepare label encoding & model only if df not empty
 le = LabelEncoder()
-y = le.fit_transform(y)
-
-# Ensure dataset has both classes
-if len(np.unique(y)) < 2:
-    dummy_row = df.iloc[0].copy()
-    dummy_row["Active Ingredient"] = "DummyUnsafe"
-    dummy_row["Safe/Not Safe"] = "Not Safe"
-    df = pd.concat([df, pd.DataFrame([dummy_row])], ignore_index=True)
-    y = df["Safe/Not Safe"]
-    y = le.fit_transform(y)
-
 numeric_cols = [
     "Days Until Expiry",
     "Storage Temperature (C)",
@@ -97,40 +133,63 @@ numeric_cols = [
     "Warning Labels Present"
 ]
 
-if df["Warning Labels Present"].dtype == "object":
-    df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0})
+# Normalize Warning Labels Present if exists
+if "Warning Labels Present" in df.columns and df["Warning Labels Present"].dtype == "object":
+    df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0}).fillna(0)
 
-X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
+# Prepare X and y for training if possible
+model = None
+if not df.empty:
+    y = df["Safe/Not Safe"].fillna("Safe")
+    y_enc = le.fit_transform(y)
+    # Ensure at least two classes for training
+    if len(np.unique(y_enc)) < 2:
+        dummy_row = df.iloc[0].copy()
+        dummy_row["Active Ingredient"] = "DummyUnsafe"
+        dummy_row["Safe/Not Safe"] = "Not Safe"
+        df = pd.concat([df, pd.DataFrame([dummy_row])], ignore_index=True)
+        y = df["Safe/Not Safe"].fillna("Safe")
+        y_enc = le.fit_transform(y)
 
-# ===============================
-# Train Model
-# ===============================
-def train_model(X, y):
-    numeric_transformer = Pipeline(steps=[
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler())
-    ])
+    # Ensure numeric_cols present in X
+    for c in numeric_cols:
+        if c not in df.columns:
+            df[c] = 0.0
+    X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
 
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ("text_ing", TfidfVectorizer(max_features=50), "Active Ingredient"),
-            ("text_dis", TfidfVectorizer(max_features=50), "Disease/Use Case"),
-            ("num", numeric_transformer, numeric_cols)
-        ]
-    )
+    # ===============================
+    # Train Model
+    # ===============================
+    def train_model(X, y):
+        numeric_transformer = Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler())
+        ])
 
-    model = Pipeline(steps=[
-        ("preprocessor", preprocessor),
-        ("classifier", LogisticRegression(max_iter=1000))
-    ])
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ("text_ing", TfidfVectorizer(max_features=50), "Active Ingredient"),
+                ("text_dis", TfidfVectorizer(max_features=50), "Disease/Use Case"),
+                ("num", numeric_transformer, numeric_cols)
+            ]
+        )
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-    model.fit(X_train, y_train)
-    return model
+        model = Pipeline(steps=[
+            ("preprocessor", preprocessor),
+            ("classifier", LogisticRegression(max_iter=1000))
+        ])
 
-model = train_model(X, y)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+        model.fit(X_train, y_train)
+        return model
+
+    try:
+        model = train_model(X, y_enc)
+    except Exception as e:
+        st.error(f"Model training failed: {e}")
+        model = None
 
 # ===============================
 # Safety Rules
@@ -148,6 +207,10 @@ SAFETY_RULES = {
 def suggest_improvements(values):
     suggestions = []
     for col, val in values.items():
+        try:
+            val = float(val)
+        except Exception:
+            continue
         rule = SAFETY_RULES.get(col, {})
         if "min" in rule and val < rule["min"]:
             suggestions.append(f"Increase **{col}** (min {rule['min']}).")
@@ -166,30 +229,61 @@ def suggest_improvements(values):
 # --- 🧪 Testing Page ---
 if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
-    st.subheader("🔍 Search by UPC or Active Ingredient")
+    st.subheader("🔍 Search by UPC or Active Ingredient (Camera / Upload supported)")
 
+    # Initialize variables
+    upc_input = ""
+    ingredient_input = ""
 
+    # Barcode scanner UI
+    col_cam, col_manual = st.columns([2, 1])
 
-    col1, col2 = st.columns(2)
-    with col1:
-        upc_input = st.text_input("Enter UPC:")
-    with col2:
-        ingredient_input = st.text_input("Enter Active Ingredient:")
+    with col_cam:
+        st.markdown("**Use device camera to scan barcode / QR**")
+        cam_img = st.camera_input("Tap to open camera (browser/mobile)")
+        if cam_img is not None:
+            bytes_data = cam_img.getvalue()
+            codes = decode_barcodes_from_bytes(bytes_data)
+            if codes:
+                detected_upc = codes[0]["data"]
+                detected_type = codes[0]["type"]
+                st.success(f"Detected ({detected_type}): {detected_upc}")
+                upc_input = detected_upc
+            else:
+                st.info("No barcode/QR detected in the photo. Try a clearer photo or upload an image.")
+
+    with col_manual:
+        st.markdown("**Or upload an image with barcode**")
+        uploaded_file = st.file_uploader("Upload barcode image (PNG/JPG)", type=["png", "jpg", "jpeg"])
+        if uploaded_file is not None:
+            bytes_data = uploaded_file.read()
+            codes = decode_barcodes_from_bytes(bytes_data)
+            if codes:
+                detected_upc = codes[0]["data"]
+                detected_type = codes[0]["type"]
+                st.success(f"Detected ({detected_type}) from upload: {detected_upc}")
+                upc_input = detected_upc
+            else:
+                st.warning("No barcode/QR found in the uploaded image.")
+
+    # Text fallback / override
+    upc_input = st.text_input("UPC (camera will auto-fill if detected)", value=upc_input)
+    ingredient_input = st.text_input("Enter Active Ingredient:", value=ingredient_input)
 
     selected_row = None
-    if upc_input:
-        match = df[df["UPC"] == upc_input]
+    if upc_input and not df.empty:
+        match = df[df["UPC"].astype(str) == str(upc_input)]
         if not match.empty:
             selected_row = match.iloc[0]
-            ingredient_input = selected_row["Active Ingredient"]
+            ingredient_input = selected_row.get("Active Ingredient", ingredient_input)
             st.success(f"✅ UPC found → Active Ingredient: {ingredient_input}")
         else:
             st.error("❌ UPC not found in dataset.")
-    elif ingredient_input:
+    elif ingredient_input and not df.empty and (not upc_input):
         match = df[df["Active Ingredient"].str.lower() == ingredient_input.lower()]
         if not match.empty:
             selected_row = match.iloc[0]
-            upc_input = selected_row["UPC"]
+            upc_input = selected_row.get("UPC", upc_input)
             st.success(f"✅ Ingredient found → UPC: {upc_input}")
         else:
             st.error("❌ Ingredient not found in dataset.")
@@ -213,124 +307,140 @@ if menu == "🧪 Testing":
                 input_data[col] = competitor_values[col]
             competitor_df = pd.DataFrame([input_data])
 
-            pred = model.predict(competitor_df)[0]
-            result = le.inverse_transform([pred])[0]
-
-            base_values = [selected_row[col] for col in numeric_cols]
-            comp_values = [competitor_values[col] for col in numeric_cols]
-
-            st.success(f"✅ Competitor Prediction: {result}")
-
-            # Show competitor details
-            st.markdown(f"**🏭 Competitor:** {comp_name} | **GST:** {comp_gst} | **Phone:** {comp_phone}")
-            st.markdown(f"**📍 Address:** {comp_address}")
-
-            # Comparison chart
-            x = np.arange(len(numeric_cols))
-            width = 0.35
-            fig, ax = plt.subplots(figsize=(12, 6))
-            ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
-            ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
-            ax.set_xticks(x)
-            ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
-            ax.set_title("Medicine Criteria Comparison")
-            ax.legend()
-            st.pyplot(fig)
-
-            # Suggestions if unsafe
-            suggestions = []
-            if result.lower() == "not safe":
-                st.error("⚠️ Competitor medicine is NOT SAFE.")
-                suggestions = suggest_improvements(competitor_values)
-                if suggestions:
-                    st.markdown("### 🔧 Suggested Improvements")
-                    for s in suggestions:
-                        st.write(f"- {s}")
-
-            # Log
-            log_entry = {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "UPC": upc_input,
-                "Ingredient": ingredient_input,
-                "Competitor": comp_name,
-                "Result": result
-            }
-            log_df = pd.DataFrame([log_entry])
-            if not os.path.exists(LOG_FILE):
-                log_df.to_csv(LOG_FILE, index=False)
+            if model is None:
+                st.error("⚠️ Model not available (training failed or dataset missing).")
             else:
-                log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+                try:
+                    pred = model.predict(competitor_df)[0]
+                    result = le.inverse_transform([pred])[0]
+                except Exception as e:
+                    st.error(f"Prediction failed: {e}")
+                    result = "Unknown"
 
-            # --- PDF Report Download ---
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-            from reportlab.lib.styles import getSampleStyleSheet
-            from reportlab.lib.pagesizes import A4
-            import io
+                base_values = [selected_row.get(col, 0) for col in numeric_cols]
+                comp_values = [competitor_values[col] for col in numeric_cols]
 
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=A4)
-            styles = getSampleStyleSheet()
-            elements = []
+                st.success(f"✅ Competitor Prediction: {result}")
 
-            # --- Add Logo ---
-            if os.path.exists("logo.png"):
-                elements.append(RLImage("logo.png", width=100, height=100))
-                elements.append(Spacer(1, 12))
+                # Show competitor details
+                st.markdown(f"**🏭 Competitor:** {comp_name} | **GST:** {comp_gst} | **Phone:** {comp_phone}")
+                st.markdown(f"**📍 Address:** {comp_address}")
 
-            # --- Title & Date ---
-            elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
-            elements.append(Spacer(1, 12))
-            elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
+                # Comparison chart
+                x = np.arange(len(numeric_cols))
+                width = 0.35
+                fig, ax = plt.subplots(figsize=(12, 6))
+                ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
+                ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
+                ax.set_xticks(x)
+                ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
+                ax.set_title("Medicine Criteria Comparison")
+                ax.legend()
+                st.pyplot(fig)
 
-            # --- Standard Medicine ---
-            elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
-            elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
-            elements.append(Paragraph(f"Ingredient: {ingredient_input}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
+                # Suggestions if unsafe
+                suggestions = []
+                if isinstance(result, str) and result.lower() == "not safe":
+                    st.error("⚠️ Competitor medicine is NOT SAFE.")
+                    suggestions = suggest_improvements(competitor_values)
+                    if suggestions:
+                        st.markdown("### 🔧 Suggested Improvements")
+                        for s in suggestions:
+                            st.write(f"- {s}")
 
-            # --- Competitor Medicine ---
-            elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
-            elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
-            elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
-            elements.append(Paragraph(f"Address: {comp_address}", styles["Normal"]))
-            elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
+                # Log
+                log_entry = {
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "UPC": upc_input,
+                    "Ingredient": ingredient_input,
+                    "Competitor": comp_name,
+                    "Result": result
+                }
+                log_df = pd.DataFrame([log_entry])
+                try:
+                    if not os.path.exists(LOG_FILE):
+                        log_df.to_csv(LOG_FILE, index=False)
+                    else:
+                        log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+                except Exception as e:
+                    st.warning(f"Could not write log: {e}")
 
-            # --- Prediction ---
-            elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-            if result.lower() == "safe":
-                elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
-            else:
-                elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
-            elements.append(Spacer(1, 12))
+                # --- PDF Report Download ---
+                buffer = io.BytesIO()
+                # Use temporary image file for chart
+                try:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                        fig.savefig(tmp.name, format='png', bbox_inches='tight')
+                        tmp_path = tmp.name
 
-            # --- Suggestions if Not Safe ---
-            if result.lower() == "not safe" and suggestions:
-                elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
-                for s in suggestions:
-                    elements.append(Paragraph(f"- {s}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    elements = []
 
-            # --- Add Comparison Chart ---
-            chart_buffer = io.BytesIO()
-            fig.savefig(chart_buffer, format="png")
-            chart_buffer.seek(0)
-            elements.append(RLImage(chart_buffer, width=400, height=250))
-            elements.append(Spacer(1, 12))
+                    # --- Add Logo ---
+                    if os.path.exists("logo.png"):
+                        elements.append(RLImage("logo.png", width=100, height=100))
+                        elements.append(Spacer(1, 12))
 
-            # --- Build PDF ---
-            doc.build(elements)
-            buffer.seek(0)
+                    # --- Title & Date ---
+                    elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
+                    elements.append(Spacer(1, 12))
+                    elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
 
-            # --- Streamlit Download Button ---
-            st.download_button(
-                label="⬇️ Download PDF Report",
-                data=buffer,
-                file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                mime="application/pdf"
-            )
+                    # --- Standard Medicine ---
+                    elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
+                    elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
+                    elements.append(Paragraph(f"Ingredient: {ingredient_input}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
 
+                    # --- Competitor Medicine ---
+                    elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
+                    elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
+                    elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
+                    elements.append(Paragraph(f"Address: {comp_address}", styles["Normal"]))
+                    elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+
+                    # --- Prediction ---
+                    elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
+                    if isinstance(result, str) and result.lower() == "safe":
+                        elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
+                    else:
+                        elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+
+                    # --- Suggestions if Not Safe ---
+                    if isinstance(result, str) and result.lower() == "not safe" and suggestions:
+                        elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
+                        for s in suggestions:
+                            elements.append(Paragraph(f"- {s}", styles["Normal"]))
+                        elements.append(Spacer(1, 12))
+
+                    # --- Add Comparison Chart ---
+                    try:
+                        elements.append(RLImage(tmp_path, width=400, height=250))
+                        elements.append(Spacer(1, 12))
+                    except Exception:
+                        pass
+
+                    # --- Build PDF ---
+                    doc.build(elements)
+                    buffer.seek(0)
+                except Exception as e:
+                    st.warning(f"Could not build PDF chart: {e}")
+
+                # --- Streamlit Download Button ---
+                try:
+                    st.download_button(
+                        label="⬇️ Download PDF Report",
+                        data=buffer,
+                        file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf"
+                    )
+                except Exception as e:
+                    st.warning(f"Could not create download button: {e}")
 
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
@@ -390,8 +500,6 @@ elif menu == "📊 Dashboard":
 
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
-
-
 
 
 # --- 📦 Inventory Page ---
