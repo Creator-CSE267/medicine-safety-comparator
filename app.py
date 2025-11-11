@@ -21,22 +21,15 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 
 try:
-    # Try ZXing first — works on Streamlit Cloud (no zbar dependency)
+    # ✅ Cloud-safe: pyzxing (no zbar dependency)
     from pyzxing import BarCodeReader
     reader = BarCodeReader()
     USE_PYZXING = True
     st.info("✅ Using pyzxing for barcode decoding (cloud-safe).")
-except Exception:
-    try:
-        # Fallback to pyzbar (requires zbar installed locally)
-        from pyzbar.pyzbar import decode as pyzbar_decode
-        USE_PYZXING = False
-        st.info("✅ Using pyzbar for barcode decoding (local mode).")
-    except Exception as e:
-        st.error(f"⚠️ No barcode library available: {e}")
-        pyzbar_decode = None
-        reader = None
-        USE_PYZXING = None
+except Exception as e:
+    reader = None
+    USE_PYZXING = False
+    st.error(f"⚠️ Barcode scanning unavailable: {e}")
 
 # Import custom styles
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
@@ -47,66 +40,55 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 # ===============================
 # Helper: decode barcodes from image bytes (Enhanced for Streamlit)
 # ===============================
-from pyzbar.pyzbar import decode as pyzbar_decode
-from PIL import Image, ImageEnhance, ImageOps
-import numpy as np
-import io
+
 
 def decode_barcodes_from_bytes(img_bytes):
     """
-    Universal barcode/QR decoder for Streamlit.
+    Streamlit Cloud–safe barcode/QR decoder using pyzxing.
+    Does not require zbar or any native libraries.
     Works with:
-      - pyzxing (no native libs, cloud-safe)
-      - pyzbar (requires zbar installed)
+      - UPC
+      - EAN
+      - Code128
+      - QR Codes
     """
-    import io, os, uuid, tempfile
+    import io, os, uuid
     from PIL import Image
 
+    if not USE_PYZXING or reader is None:
+        st.error("⚠️ Barcode reader not initialized (pyzxing missing).")
+        return []
+
     try:
-        if USE_PYZXING:
-            # --- Decode using pyzxing ---
-            tmp_name = f"/tmp/{uuid.uuid4().hex}.png"
-            image = Image.open(io.BytesIO(img_bytes))
-            image.save(tmp_name)
-            results = reader.decode(tmp_name)
+        # Save temporary image
+        tmp_name = f"/tmp/{uuid.uuid4().hex}.png"
+        image = Image.open(io.BytesIO(img_bytes))
+        image.save(tmp_name)
+
+        # Decode using pyzxing (ZXing engine)
+        results = reader.decode(tmp_name)
+
+        # Clean up
+        if os.path.exists(tmp_name):
             os.remove(tmp_name)
 
-            output = []
-            if results:
-                for r in results:
-                    if "parsed" in r:
-                        output.append({
-                            "data": r["parsed"],
-                            "type": r.get("format", "Unknown")
-                        })
-            return output
-
-        elif pyzbar_decode:
-            # --- Decode using pyzbar ---
-            from PIL import ImageEnhance, ImageOps
-            image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-            gray = ImageOps.grayscale(image)
-            contrast = ImageEnhance.Contrast(gray).enhance(2.0)
-            sharp = ImageEnhance.Sharpness(contrast).enhance(2.0)
-            arr = np.array(sharp)
-            decoded = pyzbar_decode(arr)
-
-            results = []
-            for d in decoded:
-                try:
-                    data = d.data.decode("utf-8")
-                except Exception:
-                    data = str(d.data)
-                results.append({"data": data.strip(), "type": d.type})
-            return results
-
+        # Format results
+        output = []
+        if results:
+            for r in results:
+                parsed = r.get("parsed") or r.get("raw") or ""
+                output.append({
+                    "data": parsed.strip(),
+                    "type": r.get("format", "Unknown")
+                })
         else:
-            st.error("⚠️ No decoding backend available. Install pyzxing or pyzbar.")
-            return []
+            st.info("No barcode/QR detected. Try a clearer or closer photo.")
+        return output
 
     except Exception as e:
         st.error(f"⚠️ Barcode decode error: {e}")
         return []
+
 
 
 # ===============================
