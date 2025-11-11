@@ -9,4 +9,5 @@ plotly
 pyzbar
 Pillow
 opencv-python-headless
+pyzxing
 
