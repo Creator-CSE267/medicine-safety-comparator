@@ -6,3 +6,7 @@ matplotlib
 openpyxl
 reportlab
 plotly
+pyzbar
+Pillow
+opencv-python-headless
+
