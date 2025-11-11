@@ -302,13 +302,12 @@ insert_log(
     result=log_entry["Result"]
 )
 
-        # --- PDF Report Download ---
+                # --- PDF Report Download ---
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
         from reportlab.lib.styles import getSampleStyleSheet
         from reportlab.lib.pagesizes import A4
         import io
 
-        # Create PDF buffer
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4)
         styles = getSampleStyleSheet()
@@ -372,6 +371,7 @@ insert_log(
             file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
             mime="application/pdf"
         )
+
 
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
