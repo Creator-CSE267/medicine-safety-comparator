@@ -201,8 +201,6 @@ if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
     st.subheader("🔍 Search by UPC or Active Ingredient")
 
-
-
     col1, col2 = st.columns(2)
     with col1:
         upc_input = st.text_input("Enter UPC:")
@@ -255,15 +253,15 @@ if menu == "🧪 Testing":
             st.success(f"✅ Competitor Prediction: {result}")
 
             # Show competitor details
-            st.markdown(f"🏭 Competitor:** {comp_name} | *GST:* {comp_gst} | *Phone:* {comp_phone}")
-            st.markdown(f"📍 Address:** {comp_address}")
+            st.markdown(f"🏭 Competitor: **{comp_name}** | *GST:* {comp_gst} | *Phone:* {comp_phone}")
+            st.markdown(f"📍 Address: **{comp_address}**")
 
             # Comparison chart
             x = np.arange(len(numeric_cols))
             width = 0.35
             fig, ax = plt.subplots(figsize=(12, 6))
-            ax.bar(x - width/2, base_values, width, label="Standard Medicine", color="green")
-            ax.bar(x + width/2, comp_values, width, label="Competitor Medicine", color="red")
+            ax.bar(x - width / 2, base_values, width, label="Standard Medicine", color="green")
+            ax.bar(x + width / 2, comp_values, width, label="Competitor Medicine", color="red")
             ax.set_xticks(x)
             ax.set_xticklabels(numeric_cols, rotation=30, ha="right")
             ax.set_title("Medicine Criteria Comparison")
@@ -293,84 +291,76 @@ if menu == "🧪 Testing":
                 log_df.to_csv(LOG_FILE, index=False)
             else:
                 log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
-            # --- Also store in SQLite database ---
-insert_log(
-    timestamp=log_entry["timestamp"],
-    upc=log_entry["UPC"],
-    ingredient=log_entry["Ingredient"],
-    competitor=log_entry["Competitor"],
-    result=log_entry["Result"]
-)
 
-                # --- PDF Report Download ---
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib.pagesizes import A4
-        import io
+            # --- PDF Report Download ---
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.pagesizes import A4
+            import io
 
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-        elements = []
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            styles = getSampleStyleSheet()
+            elements = []
 
-        # --- Add Logo ---
-        if os.path.exists("logo.png"):
-            elements.append(RLImage("logo.png", width=100, height=100))
+            # --- Add Logo ---
+            if os.path.exists("logo.png"):
+                elements.append(RLImage("logo.png", width=100, height=100))
+                elements.append(Spacer(1, 12))
+
+            # --- Title & Date ---
+            elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
+            elements.append(Spacer(1, 12))
+            elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
             elements.append(Spacer(1, 12))
 
-        # --- Title & Date ---
-        elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
-        elements.append(Spacer(1, 12))
-        elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
-        elements.append(Spacer(1, 12))
-
-        # --- Standard Medicine ---
-        elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
-        elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
-        elements.append(Paragraph(f"Ingredient: {ingredient_input}", styles["Normal"]))
-        elements.append(Spacer(1, 12))
-
-        # --- Competitor Medicine ---
-        elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
-        elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
-        elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
-        elements.append(Paragraph(f"Address: {comp_address}", styles["Normal"]))
-        elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
-        elements.append(Spacer(1, 12))
-
-        # --- Prediction ---
-        elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-        if result.lower() == "safe":
-            elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
-        else:
-            elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
-        elements.append(Spacer(1, 12))
-
-        # --- Suggestions if Not Safe ---
-        if result.lower() == "not safe" and suggestions:
-            elements.append(Paragraph("<b>⚠ Suggested Improvements:</b>", styles["Heading2"]))
-            for s in suggestions:
-                elements.append(Paragraph(f"- {s}", styles["Normal"]))
+            # --- Standard Medicine ---
+            elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
+            elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
+            elements.append(Paragraph(f"Ingredient: {ingredient_input}", styles["Normal"]))
             elements.append(Spacer(1, 12))
 
-        # --- Add Comparison Chart ---
-        chart_buffer = io.BytesIO()
-        fig.savefig(chart_buffer, format="png")
-        chart_buffer.seek(0)
-        elements.append(RLImage(chart_buffer, width=400, height=250))
-        elements.append(Spacer(1, 12))
+            # --- Competitor Medicine ---
+            elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
+            elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
+            elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
+            elements.append(Paragraph(f"Address: {comp_address}", styles["Normal"]))
+            elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
 
-        # --- Build PDF ---
-        doc.build(elements)
-        buffer.seek(0)
+            # --- Prediction ---
+            elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
+            if result.lower() == "safe":
+                elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
+            else:
+                elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
+            elements.append(Spacer(1, 12))
 
-        # --- Streamlit Download Button ---
-        st.download_button(
-            label="⬇ Download PDF Report",
-            data=buffer,
-            file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-            mime="application/pdf"
-        )
+            # --- Suggestions if Not Safe ---
+            if result.lower() == "not safe" and suggestions:
+                elements.append(Paragraph("<b>⚠ Suggested Improvements:</b>", styles["Heading2"]))
+                for s in suggestions:
+                    elements.append(Paragraph(f"- {s}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+            # --- Add Comparison Chart ---
+            chart_buffer = io.BytesIO()
+            fig.savefig(chart_buffer, format="png")
+            chart_buffer.seek(0)
+            elements.append(RLImage(chart_buffer, width=400, height=250))
+            elements.append(Spacer(1, 12))
+
+            # --- Build PDF ---
+            doc.build(elements)
+            buffer.seek(0)
+
+            # --- Streamlit Download Button ---
+            st.download_button(
+                label="⬇ Download PDF Report",
+                data=buffer,
+                file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf"
+            )
 
 
 # --- 📊 Dashboard Page ---
