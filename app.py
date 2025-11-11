@@ -58,12 +58,34 @@ MEDICINE_FILE = "medicine_dataset.csv"
 INVENTORY_FILE = "inventory.csv"
 CONSUMABLES_FILE = "consumables_dataset.csv"   # ✅ missing before
 LOG_FILE = "usage_log.csv"
+# ===============================
+# Database (SQLite via db.py)
+# ===============================
+from db import (
+    init_db,
+    fetch_all_medicines, fetch_all_consumables,
+    upsert_medicine, upsert_consumable,
+    append_log, fetch_recent_logs,
+    find_medicine_by_upc, find_medicine_by_ingredient
+)
+
+# Initialize DB and tables (creates medsafe.db if missing)
+init_db()
 
 # ===============================
 # Load Medicine Dataset
 # ===============================
-df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
-df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
+# Load medicine dataset from DB (fallback → CSV if DB empty)
+df = fetch_all_medicines()
+if df is None or df.empty:
+    if os.path.exists(MEDICINE_FILE):
+        df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
+        df["UPC"] = df["UPC"].astype(str).str.split(".").str[0].str.strip()
+    else:
+        df = pd.DataFrame(columns=[
+            "UPC", "Active Ingredient", "Disease/Use Case", "Safe/Not Safe"
+        ])
+
 
 df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
 if "Disease/Use Case" not in df.columns:
