@@ -19,6 +19,37 @@ import io
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+import sqlite3
+
+DB_PATH = "medsafe.db"
+
+def init_db():
+    """Create database and logs table if not exists"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            UPC TEXT,
+            Ingredient TEXT,
+            Competitor TEXT,
+            Result TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def insert_log(timestamp, upc, ingredient, competitor, result):
+    """Insert a new test log"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO logs (timestamp, UPC, Ingredient, Competitor, Result)
+        VALUES (?, ?, ?, ?, ?)
+    """, (timestamp, upc, ingredient, competitor, result))
+    conn.commit()
+    conn.close()
 
 # Import custom styles
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
@@ -40,6 +71,8 @@ set_background("bg1.jpg")
 show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
+# Initialize SQLite database
+init_db()
 
 # ===============================
 # Sidebar Navigation
@@ -260,6 +293,15 @@ if menu == "🧪 Testing":
                 log_df.to_csv(LOG_FILE, index=False)
             else:
                 log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+            # --- Also store in SQLite database ---
+insert_log(
+    timestamp=log_entry["timestamp"],
+    upc=log_entry["UPC"],
+    ingredient=log_entry["Ingredient"],
+    competitor=log_entry["Competitor"],
+    result=log_entry["Result"]
+)
+
 
             # --- PDF Report Download ---
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
@@ -390,6 +432,34 @@ elif menu == "📊 Dashboard":
 
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
+# ===============================
+# ✅ Show logs from SQLite database (in addition to CSV)
+# ===============================
+try:
+    conn = sqlite3.connect(DB_PATH)
+    db_logs = pd.read_sql_query("SELECT * FROM logs ORDER BY id DESC LIMIT 20", conn)
+    conn.close()
+
+    if not db_logs.empty:
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown("<div class='section-header'>🗂 Logs Stored in Database</div>", unsafe_allow_html=True)
+
+        total_db_logs = len(db_logs)
+        safe_db = db_logs["Result"].str.lower().eq("safe").sum()
+        unsafe_db = db_logs["Result"].str.lower().eq("not safe").sum()
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("💾 DB Logs Total", total_db_logs)
+        col2.metric("✅ Safe (DB)", safe_db)
+        col3.metric("⚠ Not Safe (DB)", unsafe_db)
+
+        st.dataframe(db_logs[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]],
+                     use_container_width=True)
+    else:
+        st.info("📭 No logs found in database yet.")
+
+except Exception as e:
+    st.warning(f"⚠ Could not load database logs: {e}")
 
 
 
