@@ -22,7 +22,8 @@ from reportlab.lib.pagesizes import A4
 
 # Barcode decoding imports
 try:
-    from pyzbar.pyzbar import decode as pyzbar_decode
+    from pyzxing import BarCodeReader
+reader = BarCodeReader()
 except Exception:
     pyzbar_decode = None
 import numpy as _np  # alias to avoid conflict with existing np import (for PIL->array)
