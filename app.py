@@ -13,42 +13,84 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from datetime import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 import io
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 
-# Login system imports
-from login import login_router
+# ------------ Login system imports (local modules) ------------
+from login import login_router        # updated router that sets last_active
 from user_database import init_user_db
 from password_reset import password_reset
+
+# ------------ App styling helpers (your file) ------------
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
-# ===============================
-# INITIALIZE USER DB
-# ===============================
+# --------------------
+# Config (tweakable)
+# --------------------
+SESSION_TIMEOUT_SECONDS = 30 * 60   # 30 minutes default (change if you want)
+
+# --------------------
+# Initialize DB (users)
+# --------------------
 init_user_db()
 
-# ===============================
-# AUTH CHECK MUST COME FIRST
-# ===============================
+# --------------------
+# Session defaults
+# --------------------
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
+if "username" not in st.session_state:
+    st.session_state["username"] = None
+if "role" not in st.session_state:
+    st.session_state["role"] = None
+if "last_active" not in st.session_state:
+    st.session_state["last_active"] = None
 
-# If NOT logged in → show login and STOP app
+# --------------------
+# SESSION TIMEOUT CHECK
+# --------------------
+def session_is_timed_out():
+    last = st.session_state.get("last_active")
+    if last is None:
+        return False
+    try:
+        last_dt = datetime.fromisoformat(last)
+    except Exception:
+        return False
+    return (datetime.now() - last_dt).total_seconds() > SESSION_TIMEOUT_SECONDS
+
+if st.session_state["authenticated"] and session_is_timed_out():
+    # logout due to timeout
+    st.warning("Session timed out due to inactivity. Please log in again.")
+    st.session_state["authenticated"] = False
+    st.session_state["username"] = None
+    st.session_state["role"] = None
+    st.session_state["last_active"] = None
+    # rerun to show login
+    st.experimental_rerun()
+
+# --------------------
+# If not authenticated -> show login UI and stop
+# --------------------
 if not st.session_state["authenticated"]:
+    # login_router will render login or password reset UI and set session_state on success
     login_router()
     st.stop()
 
-# Logged-in user info
-username = st.session_state["username"]
-role = st.session_state["role"]
+# From here the user is authenticated
+username = st.session_state.get("username")
+role = st.session_state.get("role")
 
-# ===============================
-# Apply Styles (AFTER LOGIN)
-# ===============================
+# update last_active on every new run after login (activity)
+st.session_state["last_active"] = datetime.now().isoformat()
+
+# --------------------
+# Apply styles AFTER login (so login UI isn't affected)
+# --------------------
 apply_theme()
 apply_layout_styles()
 apply_global_css()
@@ -57,29 +99,75 @@ st.set_page_config(page_title="Medicine Safety Comparator",
                    page_icon="💊",
                    layout="wide")
 
-# Background + Logo
+# --------------------
+# Background + Logo (your helpers)
+# --------------------
 set_background("bg1.jpg")
 show_logo("logo.png")
 
+# --------------------
+# Top bar / Title
+# --------------------
 st.title("💊 Medicine Safety Comparator")
 
-# ===============================
-# ROLE-BASED SIDEBAR
-# ===============================
+# --------------------
+# Sidebar with avatar + logout + role menu
+# --------------------
+def render_avatar(username, size=72):
+    """
+    Renders a circular avatar with initials if no image file exists.
+    If a file named avatars/{username}.png or .jpg exists it will be shown.
+    Otherwise initials circle is shown via HTML/CSS.
+    """
+    avatar_path_png = os.path.join("avatars", f"{username}.png")
+    avatar_path_jpg = os.path.join("avatars", f"{username}.jpg")
+    if os.path.exists(avatar_path_png):
+        st.sidebar.image(avatar_path_png, width=size)
+        return
+    if os.path.exists(avatar_path_jpg):
+        st.sidebar.image(avatar_path_jpg, width=size)
+        return
+
+    # initials fallback
+    initials = "".join([p[0] for p in username.split()][:2]).upper() if username else "U"
+    circle_html = f"""
+    <div style="
+        width:{size}px;height:{size}px;border-radius:50%;
+        background: linear-gradient(135deg,#2E86C1,#5DADE2);
+        display:flex;align-items:center;justify-content:center;
+        font-weight:700;color:white;font-size:{size//2}px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    ">{initials}</div>
+    """
+    st.sidebar.markdown(circle_html, unsafe_allow_html=True)
+
 with st.sidebar:
-    st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#2E86C1;margin-bottom:6px;'>MedSafe AI</h3>", unsafe_allow_html=True)
+    render_avatar(username, size=72)
+    st.sidebar.write(f"**{username}**")
+    st.sidebar.write(f"Role: **{role}**")
+    st.sidebar.markdown("---")
 
+    # Logout button (placed in the sidebar)
+    if st.sidebar.button("Logout 🔒"):
+        st.session_state["authenticated"] = False
+        st.session_state["username"] = None
+        st.session_state["role"] = None
+        st.session_state["last_active"] = None
+        st.success("Logged out. Redirecting to login...")
+        st.experimental_rerun()
+
+    # role-based menu
     if role == "admin":
-        menu = st.radio("📌 Navigation",
-                        ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
-
+        menu = st.sidebar.radio("📌 Navigation", ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
     elif role == "pharmacist":
-        menu = st.radio("📌 Navigation",
-                        ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
+        menu = st.sidebar.radio("📌 Navigation", ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
+    else:
+        menu = st.sidebar.radio("📌 Navigation", ["📦 Inventory"])
 
-    st.markdown("---")
-    st.write(f"👤 Logged in as: **{username}** ({role})")
-    st.write("© 2025 MedSafe AI")
+    st.sidebar.markdown("---")
+    st.sidebar.write("© 2025 MedSafe AI")
+
 
 
 
