@@ -1,64 +1,46 @@
+# styles.py
 import streamlit as st
 import base64
+from PIL import Image
 import os
 
-# ====================================
-# DISABLE BACKGROUND ON LOGIN PAGE
-# ====================================
-def disable_all_background_for_login():
-    """Remove all backgrounds & padding ONLY for login screen."""
-    st.markdown("""
-        <style>
-            .stApp, .block-container {
-                background: transparent !important;
-                padding: 0 !important;
-                margin: 0 !important;
-            }
-            header, footer, [data-testid="stToolbar"],
-            [data-testid="stDecoration"], [data-testid="stHeader"] {
-                display: none !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-# ====================================
-# THEME SETUP
-# ====================================
+# ===============================
+# Theme & Layout
+# ===============================
 def apply_theme():
+    """Initialize session state theme values."""
     if "theme_choice" not in st.session_state:
         st.session_state.theme_choice = "Light"
     if "custom_theme" not in st.session_state:
         st.session_state.custom_theme = {
             "text_color": "#000000",
-            "metric_bg": "#f5f5f5",
+            "metric_bg": "#f0f0f0",
             "button_text": "#000000",
             "button_bg": "#e0e0e0",
             "header_color": "#000000",
         }
 
-# ====================================
-# APPLY LAYOUT + SIDEBAR SETTINGS
-# ====================================
 def apply_layout_styles():
+    """Sidebar theme selector + apply chosen theme CSS."""
     THEMES = {
         "Light": {
             "text_color": "#000000",
-            "metric_bg": "#ffffff",
+            "metric_bg": "#f9f9f9",
             "button_text": "#000000",
-            "button_bg": "#eaeaea",
+            "button_bg": "#e0e0e0",
             "header_color": "#000000",
         },
         "Dark": {
-            "text_color": "#ffffff",
+            "text_color": "#FFFFFF",
             "metric_bg": "#333333",
-            "button_text": "#ffffff",
+            "button_text": "#FFFFFF",
             "button_bg": "#444444",
-            "header_color": "#ffffff",
+            "header_color": "#FFFFFF",
         }
     }
 
-    st.sidebar.markdown("### 🎨 Theme Settings")
-
+    # Sidebar theme selector
+    st.sidebar.header("🎨 Theme Settings")
     theme_choice = st.sidebar.radio(
         "Choose Theme",
         ["Light", "Dark", "Custom"],
@@ -66,124 +48,125 @@ def apply_layout_styles():
     )
     st.session_state.theme_choice = theme_choice
 
+    # Apply chosen theme
     if theme_choice in THEMES:
         THEME = THEMES[theme_choice]
     else:
         custom = st.session_state.custom_theme
         custom["text_color"]   = st.sidebar.color_picker("Text Color", custom["text_color"])
-        custom["metric_bg"]    = st.sidebar.color_picker("KPI Background", custom["metric_bg"])
-        custom["button_text"]  = st.sidebar.color_picker("Button Text", custom["button_text"])
-        custom["button_bg"]    = st.sidebar.color_picker("Button BG", custom["button_bg"])
+        custom["metric_bg"]    = st.sidebar.color_picker("KPI Card Background", custom["metric_bg"])
+        custom["button_text"]  = st.sidebar.color_picker("Button Text Color", custom["button_text"])
+        custom["button_bg"]    = st.sidebar.color_picker("Button Background", custom["button_bg"])
         custom["header_color"] = st.sidebar.color_picker("Header Color", custom["header_color"])
         st.session_state.custom_theme = custom
         THEME = custom
 
+    # Inject CSS
     st.markdown(f"""
         <style>
-            body, html {{
+            html, body, [class*="css"] {{
                 color: {THEME['text_color']} !important;
             }}
             .stMetric {{
-                background: {THEME['metric_bg']} !important;
-                padding: 12px;
+                background: {THEME['metric_bg']};
+                padding: 15px;
+                border-radius: 12px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+                color: {THEME['text_color']} !important;
+            }}
+            .stButton>button {{
+                width: 100%;
+                margin-bottom: 10px;
                 border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }}
-            .stButton > button {{
-                background: {THEME['button_bg']} !important;
+                height: 3em;
+                font-weight: bold;
                 color: {THEME['button_text']} !important;
-                font-weight: 600;
-                border-radius: 8px;
-                padding: 0.6em;
+                background-color: {THEME['button_bg']} !important;
             }}
-            h1, h2, h3, h4, h5 {{
+            h1, h2, h3, h4, h5, h6 {{
                 color: {THEME['header_color']} !important;
             }}
         </style>
     """, unsafe_allow_html=True)
 
-# ====================================
-# GLOBAL CSS — SAFE FOR DASHBOARD
-# ====================================
 def apply_global_css():
+    """Extra global CSS for dashboard/inventory cards and form labels (dark style)."""
     st.markdown("""
         <style>
-            .block-container {
-                padding-top: 0.5rem !important;
+            /* --- Titles and Sections --- */
+            .main-title {
+                font-size: 28px;
+                font-weight: bold;
+                color: #111111;  /* Dark text */
+                margin-bottom: 20px;
             }
-            [data-testid="stDecoration"] {
-                display: none !important;
+            .section-header {
+                font-size: 20px;
+                font-weight: bold;
+                margin-top: 25px;
+                margin-bottom: 10px;
+                color: #222222;  /* Darker text */
             }
-            header[data-testid="stHeader"] {
-                display: none !important;
-                height: 0px !important;
+            .card {
+                background: #f9f9f9;
+                padding: 15px;
+                border-radius: 12px;
+                margin-bottom: 15px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            /* --- Form Labels (Text, Number, Date, Select etc.) --- */
+            label, .stTextInput label, .stNumberInput label, 
+            .stDateInput label, .stSelectbox label, .stTextArea label {
+                color: #111111 !important;   /* Dark black */
+                font-weight: 600 !important;
+                font-size: 16px !important;
             }
         </style>
     """, unsafe_allow_html=True)
 
-# ====================================
-# SAFE BACKGROUND (login unaffected)
-# ====================================
+
+# ===============================
+# Background & Logo
+# ===============================
 def set_background(image_file):
+    """Set background image for app."""
     if not os.path.exists(image_file):
         return
     with open(image_file, "rb") as f:
         encoded = base64.b64encode(f.read()).decode()
-
     st.markdown(
         f"""
         <style>
-            body {{
-                background-image: url("data:image/png;base64,{encoded}");
-                background-size: cover;
-                background-repeat: no-repeat;
-                background-attachment: fixed;
-                background-position: center;
-            }}
-            .stApp {{
-                background: transparent !important;
-            }}
+        .stApp {{
+            background-image: url("data:image/jpg;base64,{encoded}");
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-attachment: fixed;
+        }}
+        .block-container {{
+            background: transparent !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True
     )
 
-# ====================================
-# SHOW LOGO — CENTER TOP
-# ====================================
 def show_logo(logo_file):
-    if not os.path.exists(logo_file):
-        return
-    with open(logo_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
+    """Display logo centered and slightly higher if exists."""
+    if os.path.exists(logo_file):
+        import base64
+        with open(logo_file, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode()
 
-    st.markdown(
-        f"""
-        <div style="width:100%; text-align:center; margin:10px 0;">
-            <img src="data:image/png;base64,{encoded}" style="width:140px;">
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        # Centered logo with upward shift
+        st.markdown(
+            f"""
+            <div style="display: flex; justify-content: center; margin-top: -40px; margin-bottom: 20px;">
+                <img src="data:image/png;base64,{encoded}" width="250">
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-# ====================================
-# FIX: RESTORE LAYOUT AFTER LOGIN
-# ====================================
-def restore_default_layout():
-    """Restores normal Streamlit layout after login."""
-    st.markdown("""
-        <style>
-            .block-container {
-                padding-top: 1rem !important;
-                margin-top: 0 !important;
-            }
-            .stApp {
-                padding: 0 !important;
-                margin: 0 !important;
-            }
-            /* Ensure sidebar displays normally */
-            section[data-testid="stSidebar"] {
-                display: block !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
