@@ -45,8 +45,11 @@ st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", la
 # Initialize user database
 init_user_db()
 
-# Handle login
+# ===============================
+# USER MUST BE LOGGED IN
+# ===============================
 username, role = login_router()
+
 if "authenticated" not in st.session_state or not st.session_state["authenticated"]:
     st.stop()
 
@@ -66,26 +69,27 @@ st.title("💊 Medicine Safety Comparator")
 # ROLE-BASED SIDEBAR NAVIGATION
 # ===============================
 
-with st.sidebar:
-    st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
+st.sidebar.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
 
-     if role == "admin":
-        menu = st.radio("📌 Navigation", [
-            "📊 Dashboard",
-            "📦 Inventory",
-            "🔑 Change Password"
-        ])
+# ---- ROLE BASED MENU ----
+if role == "admin":
+    menu = st.sidebar.radio("📌 Navigation", [
+        "📊 Dashboard",
+        "📦 Inventory",
+        "🔑 Change Password"
+    ])
 
-    elif role == "pharmacist":
-        menu = st.radio("📌 Navigation", [
-            "🧪 Testing",
-            "📦 Inventory",
-            "🔑 Change Password"
-        ])
+elif role == "pharmacist":
+    menu = st.sidebar.radio("📌 Navigation", [
+        "🧪 Testing",
+        "📦 Inventory",
+        "🔑 Change Password"
+    ])
 
-    st.markdown("---")
-    st.write(f"👤 Logged in as: **{username}** ({role})")
-    st.write("© 2025 MedSafe AI")
+# ---- FOOTER ----
+st.sidebar.markdown("---")
+st.sidebar.write(f"👤 Logged in as: **{username}** ({role})")
+st.sidebar.write("© 2025 MedSafe AI")
 
 
 # ===============================
