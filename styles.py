@@ -1,10 +1,13 @@
 import streamlit as st
 import base64
-from PIL import Image
 import os
 
+
+# ====================================
+# DISABLE BACKGROUND ON LOGIN PAGE
+# ====================================
 def disable_all_background_for_login():
-    """Completely remove background, padding, container spacing on login screen."""
+    """Remove all backgrounds & padding ONLY for login screen."""
     st.markdown("""
         <style>
             .stApp, .block-container {
@@ -13,62 +16,55 @@ def disable_all_background_for_login():
                 margin: 0 !important;
             }
 
-            [data-testid="stAppViewBlockContainer"] {
-                padding: 0 !important;
-                margin: 0 !important;
-            }
-
-            header, footer {
-                display: none !important;
-            }
-
-            /* Remove Streamlit's ghost top padding container */
-            [data-testid="stDecoration"] {
-                display: none !important;
-            }
-            [data-testid="stHeader"] {
+            header, footer, [data-testid="stToolbar"],
+            [data-testid="stDecoration"], [data-testid="stHeader"] {
                 display: none !important;
             }
         </style>
     """, unsafe_allow_html=True)
 
-# ===============================
-# Theme & Layout
-# ===============================
+
+# ====================================
+# THEME SETUP
+# ====================================
 def apply_theme():
-    """Initialize session state theme values."""
+    """Initialize theme in session_state if missing."""
     if "theme_choice" not in st.session_state:
         st.session_state.theme_choice = "Light"
     if "custom_theme" not in st.session_state:
         st.session_state.custom_theme = {
             "text_color": "#000000",
-            "metric_bg": "#f0f0f0",
+            "metric_bg": "#f5f5f5",
             "button_text": "#000000",
             "button_bg": "#e0e0e0",
             "header_color": "#000000",
         }
 
+
+# ====================================
+# APPLY LAYOUT + SIDEBAR THEME PICKER
+# ====================================
 def apply_layout_styles():
-    """Sidebar theme selector + apply chosen theme CSS."""
     THEMES = {
         "Light": {
             "text_color": "#000000",
-            "metric_bg": "#f9f9f9",
+            "metric_bg": "#ffffff",
             "button_text": "#000000",
-            "button_bg": "#e0e0e0",
+            "button_bg": "#eaeaea",
             "header_color": "#000000",
         },
         "Dark": {
-            "text_color": "#FFFFFF",
+            "text_color": "#ffffff",
             "metric_bg": "#333333",
-            "button_text": "#FFFFFF",
+            "button_text": "#ffffff",
             "button_bg": "#444444",
-            "header_color": "#FFFFFF",
+            "header_color": "#ffffff",
         }
     }
 
-    # Sidebar theme selector
-    st.sidebar.header("🎨 Theme Settings")
+    st.sidebar.markdown("### 🎨 Theme Settings")
+
+    # User selection
     theme_choice = st.sidebar.radio(
         "Choose Theme",
         ["Light", "Dark", "Custom"],
@@ -76,7 +72,7 @@ def apply_layout_styles():
     )
     st.session_state.theme_choice = theme_choice
 
-    # Apply chosen theme
+    # Retrieve selected theme
     if theme_choice in THEMES:
         THEME = THEMES[theme_choice]
     else:
@@ -84,89 +80,62 @@ def apply_layout_styles():
         custom["text_color"]   = st.sidebar.color_picker("Text Color", custom["text_color"])
         custom["metric_bg"]    = st.sidebar.color_picker("KPI Card Background", custom["metric_bg"])
         custom["button_text"]  = st.sidebar.color_picker("Button Text Color", custom["button_text"])
-        custom["button_bg"]    = st.sidebar.color_picker("Button Background", custom["button_bg"])
+        custom["button_bg"]    = st.sidebar.color_picker("Button BG Color", custom["button_bg"])
         custom["header_color"] = st.sidebar.color_picker("Header Color", custom["header_color"])
         st.session_state.custom_theme = custom
         THEME = custom
 
-    # Inject CSS
+    # Inject theme CSS safely
     st.markdown(f"""
         <style>
-            html, body, [class*="css"] {{
+            body, html {{
                 color: {THEME['text_color']} !important;
             }}
             .stMetric {{
-                background: {THEME['metric_bg']};
-                padding: 15px;
-                border-radius: 12px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-                color: {THEME['text_color']} !important;
-            }}
-            .stButton>button {{
-                width: 100%;
-                margin-bottom: 10px;
+                background: {THEME['metric_bg']} !important;
+                padding: 12px;
                 border-radius: 10px;
-                height: 3em;
-                font-weight: bold;
-                color: {THEME['button_text']} !important;
-                background-color: {THEME['button_bg']} !important;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }}
-            h1, h2, h3, h4, h5, h6 {{
+            .stButton > button {{
+                background: {THEME['button_bg']} !important;
+                color: {THEME['button_text']} !important;
+                font-weight: 600;
+                border-radius: 8px;
+                padding: 0.6em;
+            }}
+            h1, h2, h3, h4, h5 {{
                 color: {THEME['header_color']} !important;
             }}
         </style>
     """, unsafe_allow_html=True)
 
 
-# ===============================
-# GLOBAL CSS — SAFE FOR LOGIN PAGE
-# ===============================
+# ====================================
+# GLOBAL CSS — SAFE (DOESN'T BREAK SIDEBAR)
+# ====================================
 def apply_global_css():
     st.markdown("""
         <style>
-
-        /* Remove any default padding that creates blank area */
-        .block-container {
-            padding-top: 0rem !important;
-        }
-
-        /* Remove Streamlit top blank spacer */
-        div[data-testid="stDecoration"] {
-            display: none !important;
-        }
-
-        div[data-testid="stToolbar"] {
-            display: none !important;
-        }
-
-        header[data-testid="stHeader"] {
-            height: 0px !important;
-            display: none !important;
-        }
-
-        /* Login box centering */
-        .login-container {
-            max-width: 420px !important;
-            margin: auto !important;
-            margin-top: 60px !important;
-        }
-
-        .main-title {
-            font-size: 28px;
-            font-weight: bold;
-            color: #ffffff;
-        }
-
+            .block-container {
+                padding-top: 0.5rem !important;
+            }
+            [data-testid="stDecoration"] {
+                display: none !important;
+            }
+            header[data-testid="stHeader"] {
+                display: none !important;
+                height: 0px !important;
+            }
         </style>
     """, unsafe_allow_html=True)
 
 
-
-# ===============================
-# BACKGROUND (ONLY AFTER LOGIN)
-# ===============================
+# ====================================
+# SAFE BACKGROUND (SIDE BAR WILL STILL WORK)
+# ====================================
 def set_background(image_file):
-    """Full-page BG without affecting Streamlit layout or sidebar."""
+    """Apply background image WITHOUT breaking sidebar or layout."""
     if not os.path.exists(image_file):
         return
 
@@ -176,25 +145,17 @@ def set_background(image_file):
     st.markdown(
         f"""
         <style>
-            /* Safe background that DOES NOT override layout */
-            .stApp {{
-                background: none !important;
-            }}
-
             body {{
                 background-image: url("data:image/png;base64,{encoded}");
                 background-size: cover;
                 background-repeat: no-repeat;
-                background-position: center;
                 background-attachment: fixed;
+                background-position: center;
             }}
 
-            /* Do NOT hide Streamlit containers */
-            header {{
-                display: block !important;
-            }}
-            [data-testid="stHeader"] {{
-                display: block !important;
+            /* DO NOT hide essential Streamlit wrappers */
+            .stApp {{
+                background: transparent !important;
             }}
         </style>
         """,
@@ -202,61 +163,22 @@ def set_background(image_file):
     )
 
 
-
-
-# ===============================
-# LOGO — CENTERED FOR DASHBOARD ONLY
-# ===============================
+# ====================================
+# LOGO SAFE CENTERED
+# ====================================
 def show_logo(logo_file):
-    """Display logo centered without adding unwanted white box."""
-    if os.path.exists(logo_file):
-        import base64
-        with open(logo_file, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode()
+    if not os.path.exists(logo_file):
+        return
 
-        st.markdown(
-            f"""
-            <style>
-                .logo-container {{
-                    width: 100%;
-                    display: flex;
-                    justify-content: center;
-                    margin-top: 20px;
-                    margin-bottom: 10px;
-                }}
-                .logo-container img {{
-                    width: 140px;
-                }}
-            </style>
+    with open(logo_file, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode()
 
-            <div class="logo-container">
-                <img src="data:image/png;base64,{encoded}">
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-
-def fix_login_spacing():
-    """Remove Streamlit default padding that causes the blank top block."""
-    st.markdown("""
-        <style>
-            /* REMOVE all top padding and container spacing */
-            .block-container {
-                padding-top: 0 !important;
-                padding-bottom: 0 !important;
-                margin-top: 0 !important;
-            }
-            header, footer, .stAppHeader {
-                display: none !important;
-            }
-            /* REMOVE that annoying white top block from theme layouts */
-            .st-emotion-cache-18ni7ap {
-                padding-top: 0 !important;
-                margin-top: 0 !important;
-            }
-            .st-emotion-cache-1jicfl2 {
-                padding-top: 0 !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="width:100%; text-align:center; margin:10px 0;">
+            <img src="data:image/png;base64,{encoded}" 
+                 style="width:140px;">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
