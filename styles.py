@@ -174,15 +174,29 @@ def set_background(image_file):
 # LOGO — CENTERED FOR DASHBOARD ONLY
 # ===============================
 def show_logo(logo_file):
-    """Centered logo for dashboard (NOT for login)."""
+    """Display logo centered without adding unwanted white box."""
     if os.path.exists(logo_file):
+        import base64
         with open(logo_file, "rb") as f:
             encoded = base64.b64encode(f.read()).decode()
 
         st.markdown(
             f"""
-            <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 20px;">
-                <img src="data:image/png;base64,{encoded}" width="220">
+            <style>
+                .logo-container {{
+                    width: 100%;
+                    display: flex;
+                    justify-content: center;
+                    margin-top: 20px;
+                    margin-bottom: 10px;
+                }}
+                .logo-container img {{
+                    width: 140px;
+                }}
+            </style>
+
+            <div class="logo-container">
+                <img src="data:image/png;base64,{encoded}">
             </div>
             """,
             unsafe_allow_html=True
