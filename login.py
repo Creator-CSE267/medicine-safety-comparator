@@ -67,6 +67,8 @@ def login_page():
         st.session_state["login_username"] = ""
         st.session_state["login_password"] = ""
         st.experimental_rerun()
+        return
+
 
     if change_pass_btn:
         if not username:
@@ -75,6 +77,8 @@ def login_page():
         st.session_state["do_reset"] = True
         st.session_state["reset_username"] = username
         st.experimental_rerun()
+        return
+
 
     if login_btn:
         if not username or not password:
@@ -98,5 +102,6 @@ def login_page():
             st.session_state["last_active"] = datetime.now().isoformat()
             st.success("Login successful — redirecting...")
             st.experimental_rerun()
+            return
         else:
             st.error("Incorrect password.")
