@@ -20,7 +20,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from user_database import init_user_db
-from login.py import login_page
+from login import login_page, init_user_db, password_reset
 from password_reset import password_reset
 
 
