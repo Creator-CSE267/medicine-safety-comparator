@@ -1,18 +1,7 @@
 # app.py
-
-# -------------------------------------------------------
-# app.py (FIXED LOGIN + PAGE CONFIG + SESSION HANDLING)
-# -------------------------------------------------------
+# app.py
 
 import streamlit as st
-
-# MUST BE THE FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="Medicine Safety Comparator",
-                   page_icon="💊",
-                   layout="wide",
-                   initial_sidebar_state="collapsed")
-
-# Standard imports
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -33,82 +22,110 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 
-# Login modules
+# 🔹 Login system imports
 from login import login_router
 from user_database import init_user_db
-
-# THEME – will be loaded ONLY AFTER LOGIN
-from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
+from password_reset import password_reset
 
 
-# -------------------------------------------------------
-# 1️⃣ Initialize user database
-# -------------------------------------------------------
+# --------------------
+# Config (tweakable)
+# --------------------
+SESSION_TIMEOUT_SECONDS = 30 * 60   # 30 minutes default (change if you want)
+
+# --------------------
+# Initialize DB (users)
+# --------------------
 init_user_db()
 
-
-# -------------------------------------------------------
-# 2️⃣ Session defaults
-# -------------------------------------------------------
+# --------------------
+# Session defaults
+# --------------------
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
-
 if "username" not in st.session_state:
     st.session_state["username"] = None
-
 if "role" not in st.session_state:
     st.session_state["role"] = None
-
 if "last_active" not in st.session_state:
     st.session_state["last_active"] = None
 
-
-# -------------------------------------------------------
-# 3️⃣ Session timeout check
-# -------------------------------------------------------
-SESSION_TIMEOUT = 30 * 60  # 30 minutes
-
-def session_expired():
-    last = st.session_state["last_active"]
+# --------------------
+# SESSION TIMEOUT CHECK
+# --------------------
+def session_is_timed_out():
+    last = st.session_state.get("last_active")
     if last is None:
         return False
-    return (datetime.now() - datetime.fromisoformat(last)).total_seconds() > SESSION_TIMEOUT
+    try:
+        last_dt = datetime.fromisoformat(last)
+    except Exception:
+        return False
+    return (datetime.now() - last_dt).total_seconds() > SESSION_TIMEOUT_SECONDS
 
-
-if st.session_state["authenticated"] and session_expired():
-    st.warning("Session expired. Please log in again.")
+if st.session_state["authenticated"] and session_is_timed_out():
+    # logout due to timeout
+    st.warning("Session timed out due to inactivity. Please log in again.")
     st.session_state["authenticated"] = False
     st.session_state["username"] = None
     st.session_state["role"] = None
     st.session_state["last_active"] = None
+    # rerun to show login
     st.rerun()
 
+# --------------------
+# If not authenticated → show login
+# --------------------
+if not st.session_state["authenticated"]:
+    # login_router renders the login UI and sets session_state on success
+    username, role = login_router()
+    # Make sure we stop here so the app only shows login until auth completes
+    st.stop()
 
-# -------------------------------------------------------
-# 4️⃣ LOGIN GATE (nothing else loads until login is success)
-# -------------------------------------------------------
+# From here the user is authenticated (login_router should set these)
+username = st.session_state.get("username")
+role = st.session_state.get("role")
+
+# update last_active on every new run after login (activity)
+st.session_state["last_active"] = datetime.now().isoformat()
+
+# =====================================================
+# LOGIN FIRST – NO THEME APPLIED BEFORE AUTHENTICATION
+# =====================================================
+from login import login_router
+from user_database import init_user_db
+
+init_user_db()
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# Show login until success
 if not st.session_state["authenticated"]:
     login_router()
     st.stop()
 
-# user authenticated
-username = st.session_state["username"]
-role = st.session_state["role"]
-st.session_state["last_active"] = datetime.now().isoformat()
+# =====================================================
+# ONLY AFTER LOGIN → APPLY FULL THEME + BACKGROUND
+# =====================================================
+from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
-
-# -------------------------------------------------------
-# 5️⃣ APPLY STYLING ONLY AFTER LOGIN (avoids blank space)
-# -------------------------------------------------------
 apply_theme()
 apply_layout_styles()
 apply_global_css()
 set_background("bg1.jpg")
 show_logo("logo.png")
 
-# -------------------------------------------------------
-# From here → continue your Testing, Dashboard, Inventory pages
-# -------------------------------------------------------
+
+st.set_page_config(page_title="Medicine Safety Comparator",
+                   page_icon="💊",
+                   layout="wide")
+
+# --------------------
+# Background + Logo (your helpers)
+# --------------------
+set_background("bg1.jpg")
+show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
 
