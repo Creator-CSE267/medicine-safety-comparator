@@ -43,7 +43,10 @@ init_user_db()
 
 # Show login and obtain username, role (login_page will stop the app until login)
 username, role = login_page()
-
+# Handle change password
+if "go_reset_password" in st.session_state and st.session_state["go_reset_password"]:
+    password_reset(username)
+    st.stop()
 
 # If login fails, stop the app
 if username is None:
