@@ -78,7 +78,6 @@ if st.session_state["authenticated"] and session_is_timed_out():
 # --------------------
 if not st.session_state["authenticated"]:
     # login_router will render login or password reset UI and set session_state on success
-    login_router()
     st.stop()
 
 # From here the user is authenticated
