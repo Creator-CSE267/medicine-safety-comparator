@@ -19,6 +19,10 @@ import io
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+from user_database import init_user_db
+from login.py import login_page
+from password_reset import password_reset
+
 
 # Import custom styles
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
@@ -34,6 +38,15 @@ apply_global_css()   # ✅ apply CSS globally
 # Page Config
 # ===============================
 st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
+# Initialize login database
+init_user_db()
+
+# Show Login Page
+username, role = login_page()
+
+# If login fails, stop the app
+if username is None:
+    st.stop()
 
 # Background + Logo
 set_background("bg1.jpg")
@@ -45,6 +58,12 @@ st.title("💊 Medicine Safety Comparator")
 # Sidebar Navigation
 # ===============================
 with st.sidebar:
+    if role == "admin":
+    menu = st.sidebar.radio("📌 Navigation", ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
+
+elif role == "pharmacist":
+    menu = st.sidebar.radio("📌 Navigation", ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
+
     st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
     menu = st.radio("📌 Navigation", ["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
     st.markdown("---")
@@ -556,3 +575,24 @@ elif menu == "📦 Inventory":
     except Exception as e:
         st.error(f"⚠ Could not process inventory: {e}")
         st.info("Try deleting or fixing the CSV files if the issue persists.")
+
+# ===============================
+# STEP 6 — PASSWORD RESET PAGE
+# ===============================
+
+if menu == "🔑 Change Password":
+    st.header("🔑 Change Your Password")
+
+    new_pass = st.text_input("Enter New Password", type="password")
+    confirm_pass = st.text_input("Confirm New Password", type="password")
+
+    if st.button("Update Password"):
+        if not new_pass or not confirm_pass:
+            st.warning("Please fill all fields.")
+        elif new_pass != confirm_pass:
+            st.error("Passwords do not match!")
+        else:
+            update_password(username, new_pass)
+            st.success("✅ Password updated successfully! Please login again.")
+            st.info("Restart the app or refresh the page to continue.")
+
