@@ -18,21 +18,29 @@ from sklearn.impute import SimpleImputer
 from datetime import datetime, timedelta
 from PIL import Image
 import io
+
 # ------------ Login system imports ------------
 from login import login_router
 from user_database import init_user_db
 from password_reset import password_reset
 
-# ------------ Styling helpers -----------------
+# ------------ Styling helpers ------------
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
-# --------------- CONFIG ------------------------
-SESSION_TIMEOUT_SECONDS = 30 * 60
 
-# --------------- INIT DB -----------------------
-init_user_db()
+# ==========================
+#  INITIAL SETUP
+# ==========================
+st.set_page_config(page_title="Medicine Safety Comparator",
+                   page_icon="💊",
+                   layout="wide")
 
-# --------------- SESSION DEFAULTS --------------
+init_user_db()      # DB init only once
+
+
+# ==========================
+#  SESSION VARIABLES
+# ==========================
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 if "username" not in st.session_state:
@@ -43,37 +51,39 @@ if "last_active" not in st.session_state:
     st.session_state["last_active"] = None
 
 
-# ---------------- TIMEOUT CHECK ----------------
+# ==========================
+#  SESSION TIMEOUT
+# ==========================
+SESSION_TIMEOUT_SECONDS = 30 * 60   # 30 mins
+
 def session_is_timed_out():
-    last = st.session_state.get("last_active")
+    last = st.session_state["last_active"]
     if not last:
         return False
     return (datetime.now() - datetime.fromisoformat(last)).total_seconds() > SESSION_TIMEOUT_SECONDS
 
-
 if st.session_state["authenticated"] and session_is_timed_out():
-    st.warning("Session timed out. Login again.")
+    st.warning("Session expired. Please login again.")
     st.session_state["authenticated"] = False
     st.rerun()
 
 
-# ---------------- LOGIN FIRST -------------------
+# ==========================
+#  LOGIN HANDLING
+# ==========================
 if not st.session_state["authenticated"]:
-    login_router()
-    st.stop()
+    login_router()      # SHOW LOGIN PAGE
+    st.stop()           # STOP APP HERE UNTIL LOGIN SUCCESS
 
 
-# ------- AUTH SUCCESS → READ USER DATA ----------
+# ==========================
+#  AFTER LOGIN SUCCESS
+# ==========================
 username = st.session_state["username"]
 role = st.session_state["role"]
 st.session_state["last_active"] = datetime.now().isoformat()
 
-
-# ------------- APPLY THEME AFTER LOGIN ----------
-st.set_page_config(page_title="Medicine Safety Comparator",
-                   page_icon="💊",
-                   layout="wide")
-
+# Apply theme AFTER login only
 apply_theme()
 apply_layout_styles()
 apply_global_css()
@@ -84,67 +94,59 @@ show_logo("logo.png")
 st.title("💊 Medicine Safety Comparator")
 
 
-
-# --------------------
-# Sidebar with avatar + logout + role menu
-# --------------------
+# ==========================
+#  SIDEBAR (always visible after login)
+# ==========================
 def render_avatar(username, size=72):
-    """
-    Renders a circular avatar with initials if no image file exists.
-    If a file named avatars/{username}.png or .jpg exists it will be shown.
-    Otherwise initials circle is shown via HTML/CSS.
-    """
-    avatar_path_png = os.path.join("avatars", f"{username}.png")
-    avatar_path_jpg = os.path.join("avatars", f"{username}.jpg")
-    if os.path.exists(avatar_path_png):
-        st.sidebar.image(avatar_path_png, width=size)
+    avatar_png = os.path.join("avatars", f"{username}.png")
+    avatar_jpg = os.path.join("avatars", f"{username}.jpg")
+
+    if os.path.exists(avatar_png):
+        st.sidebar.image(avatar_png, width=size)
         return
-    if os.path.exists(avatar_path_jpg):
-        st.sidebar.image(avatar_path_jpg, width=size)
+    if os.path.exists(avatar_jpg):
+        st.sidebar.image(avatar_jpg, width=size)
         return
 
-    # initials fallback
-    initials = "".join([p[0] for p in username.split()][:2]).upper() if username else "U"
-    circle_html = f"""
-    <div style="
-        width:{size}px;height:{size}px;border-radius:50%;
-        background: linear-gradient(135deg,#2E86C1,#5DADE2);
-        display:flex;align-items:center;justify-content:center;
-        font-weight:700;color:white;font-size:{size//2}px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    ">{initials}</div>
-    """
-    st.sidebar.markdown(circle_html, unsafe_allow_html=True)
+    initials = "".join([p[0] for p in username.split()][:2]).upper()
+    st.sidebar.markdown(
+        f"""
+        <div style="
+            width:{size}px;height:{size}px;border-radius:50%;
+            background: linear-gradient(135deg,#2E86C1,#5DADE2);
+            display:flex;align-items:center;justify-content:center;
+            font-size:{size//2}px;font-weight:bold;color:white;">
+            {initials}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 with st.sidebar:
-    st.markdown("<h3 style='color:#2E86C1;margin-bottom:6px;'>MedSafe AI</h3>", unsafe_allow_html=True)
-    render_avatar(username, size=72)
-    st.sidebar.write(f"**{username}**")
-    st.sidebar.write(f"Role: **{role}**")
-    st.sidebar.markdown("---")
+    st.markdown("<h3 style='color:#2E86C1;'>MedSafe AI</h3>", unsafe_allow_html=True)
+    render_avatar(username)
 
-    # Logout button (placed in the sidebar)
-    if st.sidebar.button("Logout 🔒"):
+    st.write(f"**{username}**")
+    st.write(f"Role: **{role}**")
+    st.markdown("---")
+
+    if st.button("Logout 🔒"):
         st.session_state["authenticated"] = False
-        st.session_state["username"] = None
-        st.session_state["role"] = None
-        st.session_state["last_active"] = None
-        st.success("Logged out. Redirecting to login...")
         st.rerun()
 
-    # role-based menu
+    # ROLE BASED MENU
     if role == "admin":
-        menu = st.sidebar.radio("📌 Navigation", ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
+        menu = st.radio("📌 Navigation",
+                        ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
     elif role == "pharmacist":
-        menu = st.sidebar.radio("📌 Navigation", ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
+        menu = st.radio("📌 Navigation",
+                        ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
     else:
-        menu = st.sidebar.radio("📌 Navigation", ["📦 Inventory"])
+        menu = st.radio("📌 Navigation",
+                        ["📦 Inventory"])
 
-    st.sidebar.markdown("---")
-    st.sidebar.write("© 2025 MedSafe AI")
-
-
-
+    st.markdown("---")
+    st.write("© 2025 MedSafe AI")
 
 # ===============================
 # File Paths
