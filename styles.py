@@ -2,12 +2,11 @@ import streamlit as st
 import base64
 import os
 
-
-# ====================================
-# DISABLE BACKGROUND ON LOGIN PAGE
-# ====================================
+# ====================================================
+#  LOGIN PAGE — ONLY REMOVE BACKGROUND + SPACING HERE
+# ====================================================
 def disable_all_background_for_login():
-    """Remove all backgrounds & padding ONLY for login screen."""
+    """Used ONLY on login screen."""
     st.markdown("""
         <style>
             .stApp, .block-container {
@@ -16,34 +15,56 @@ def disable_all_background_for_login():
                 margin: 0 !important;
             }
 
-            header, footer, [data-testid="stToolbar"],
-            [data-testid="stDecoration"], [data-testid="stHeader"] {
+            /* Hide header ONLY FOR LOGIN */
+            header, footer,
+            [data-testid="stToolbar"],
+            [data-testid="stDecoration"] {
                 display: none !important;
             }
         </style>
     """, unsafe_allow_html=True)
 
 
-# ====================================
-# THEME SETUP
-# ====================================
+# ====================================================
+#  RESTORE STREAMLIT DEFAULT LAYOUT AFTER LOGIN
+# ====================================================
+def restore_default_layout():
+    """Re-enable normal layout so sidebar appears."""
+    st.markdown("""
+        <style>
+            header, [data-testid="stHeader"] {
+                display: block !important;
+                visibility: visible !important;
+                height: auto !important;
+            }
+
+            .block-container {
+                padding-top: 1rem !important;
+                margin-top: 0 !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+
+# ====================================================
+# THEME INITIALIZER
+# ====================================================
 def apply_theme():
-    """Initialize theme in session_state if missing."""
     if "theme_choice" not in st.session_state:
         st.session_state.theme_choice = "Light"
     if "custom_theme" not in st.session_state:
         st.session_state.custom_theme = {
-            "text_color": "#000000",
+            "text_color": "#000",
             "metric_bg": "#f5f5f5",
-            "button_text": "#000000",
+            "button_text": "#000",
             "button_bg": "#e0e0e0",
-            "header_color": "#000000",
+            "header_color": "#000",
         }
 
 
-# ====================================
-# APPLY LAYOUT + SIDEBAR THEME PICKER
-# ====================================
+# ====================================================
+# SIDEBAR THEME CONTROLS
+# ====================================================
 def apply_layout_styles():
     THEMES = {
         "Light": {
@@ -64,28 +85,25 @@ def apply_layout_styles():
 
     st.sidebar.markdown("### 🎨 Theme Settings")
 
-    # User selection
-    theme_choice = st.sidebar.radio(
+    choice = st.sidebar.radio(
         "Choose Theme",
         ["Light", "Dark", "Custom"],
         index=["Light", "Dark", "Custom"].index(st.session_state.theme_choice)
     )
-    st.session_state.theme_choice = theme_choice
+    st.session_state.theme_choice = choice
 
-    # Retrieve selected theme
-    if theme_choice in THEMES:
-        THEME = THEMES[theme_choice]
+    if choice in THEMES:
+        THEME = THEMES[choice]
     else:
         custom = st.session_state.custom_theme
-        custom["text_color"]   = st.sidebar.color_picker("Text Color", custom["text_color"])
-        custom["metric_bg"]    = st.sidebar.color_picker("KPI Card Background", custom["metric_bg"])
-        custom["button_text"]  = st.sidebar.color_picker("Button Text Color", custom["button_text"])
-        custom["button_bg"]    = st.sidebar.color_picker("Button BG Color", custom["button_bg"])
+        custom["text_color"] = st.sidebar.color_picker("Text Color", custom["text_color"])
+        custom["metric_bg"] = st.sidebar.color_picker("KPI Card Background", custom["metric_bg"])
+        custom["button_text"] = st.sidebar.color_picker("Button Text Color", custom["button_text"])
+        custom["button_bg"] = st.sidebar.color_picker("Button BG", custom["button_bg"])
         custom["header_color"] = st.sidebar.color_picker("Header Color", custom["header_color"])
         st.session_state.custom_theme = custom
         THEME = custom
 
-    # Inject theme CSS safely
     st.markdown(f"""
         <style>
             body, html {{
@@ -95,90 +113,50 @@ def apply_layout_styles():
                 background: {THEME['metric_bg']} !important;
                 padding: 12px;
                 border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }}
             .stButton > button {{
                 background: {THEME['button_bg']} !important;
                 color: {THEME['button_text']} !important;
-                font-weight: 600;
                 border-radius: 8px;
-                padding: 0.6em;
+                font-weight: 600;
             }}
-            h1, h2, h3, h4, h5 {{
+            h1, h2, h3, h4 {{
                 color: {THEME['header_color']} !important;
             }}
         </style>
     """, unsafe_allow_html=True)
 
 
-# ====================================
-# GLOBAL CSS — SAFE (DOESN'T BREAK SIDEBAR)
-# ====================================
-def apply_global_css():
-    st.markdown("""
-        <style>
-            .block-container {
-                padding-top: 0.5rem !important;
-            }
-            [data-testid="stDecoration"] {
-                display: none !important;
-            }
-            header[data-testid="stHeader"] {
-                display: none !important;
-                height: 0px !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-
-# ====================================
-# SAFE BACKGROUND (SIDE BAR WILL STILL WORK)
-# ====================================
+# ====================================================
+# BACKGROUND (SAFE)
+# ====================================================
 def set_background(image_file):
-    """Apply background image WITHOUT breaking sidebar or layout."""
     if not os.path.exists(image_file):
         return
 
-    with open(image_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-
-    st.markdown(
-        f"""
+    encoded = base64.b64encode(open(image_file, "rb").read()).decode()
+    st.markdown(f"""
         <style>
             body {{
                 background-image: url("data:image/png;base64,{encoded}");
                 background-size: cover;
                 background-repeat: no-repeat;
                 background-attachment: fixed;
-                background-position: center;
-            }}
-
-            /* DO NOT hide essential Streamlit wrappers */
-            .stApp {{
-                background: transparent !important;
             }}
         </style>
-        """,
-        unsafe_allow_html=True
-    )
+    """, unsafe_allow_html=True)
 
 
-# ====================================
-# LOGO SAFE CENTERED
-# ====================================
+# ====================================================
+# LOGO (SAFE)
+# ====================================================
 def show_logo(logo_file):
     if not os.path.exists(logo_file):
         return
 
-    with open(logo_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-
-    st.markdown(
-        f"""
-        <div style="width:100%; text-align:center; margin:10px 0;">
-            <img src="data:image/png;base64,{encoded}" 
-                 style="width:140px;">
+    encoded = base64.b64encode(open(logo_file, "rb").read()).decode()
+    st.markdown(f"""
+        <div style="text-align:center; margin: 15px 0;">
+            <img src="data:image/png;base64,{encoded}" width="130">
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+    """, unsafe_allow_html=True)
