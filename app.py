@@ -19,36 +19,32 @@ import io
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+
 # Login system imports
 from login import login_router
 from user_database import init_user_db
 from password_reset import password_reset
+from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
 # ===============================
-# INITIALIZE DB
+# INITIALIZE USER DB
 # ===============================
 init_user_db()
 
 # ===============================
-# AUTH CHECK — MUST BE FIRST
+# AUTH CHECK MUST COME FIRST
 # ===============================
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# If NOT logged in → show login router
+# If NOT logged in → show login and STOP app
 if not st.session_state["authenticated"]:
-    username, role = login_router()
+    login_router()
     st.stop()
 
-# Already logged in → read session values
+# Logged-in user info
 username = st.session_state["username"]
 role = st.session_state["role"]
-
-
-
-
-# Import custom styles
-from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
 # ===============================
 # Apply Styles (AFTER LOGIN)
@@ -61,28 +57,11 @@ st.set_page_config(page_title="Medicine Safety Comparator",
                    page_icon="💊",
                    layout="wide")
 
-# Initialize user database
-init_user_db()
-
-# ===============================
-# USER MUST BE LOGGED IN
-# ===============================
-username, role = login_router()
-
-if "authenticated" not in st.session_state or not st.session_state["authenticated"]:
-    st.stop()
-
-
-# If login fails, stop the app
-if username is None:
-    st.stop()
-
 # Background + Logo
 set_background("bg1.jpg")
 show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
-
 
 # ===============================
 # ROLE-BASED SIDEBAR
@@ -100,7 +79,8 @@ with st.sidebar:
 
     st.markdown("---")
     st.write(f"👤 Logged in as: **{username}** ({role})")
-st.sidebar.write("© 2025 MedSafe AI")
+    st.write("© 2025 MedSafe AI")
+
 
 
 # ===============================
