@@ -1,15 +1,5 @@
-# =====================================================
-# app.py  (FINAL FULLY FIXED VERSION)
-# =====================================================
-
+# app.py
 import streamlit as st
-st.set_page_config(
-    page_title="Medicine Safety Comparator",
-    page_icon="💊",
-    layout="wide"
-)
-
-# -------------------- System Imports --------------------
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,132 +16,39 @@ from sklearn.impute import SimpleImputer
 from datetime import datetime
 from PIL import Image
 import io
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
 
-# -------------------- Local Modules ----------------------
-from login import login_router
-from user_database import init_user_db
-from password_reset import password_reset
-from styles import (
-    apply_theme, apply_layout_styles,
-    apply_global_css, set_background, show_logo,restore_default_layout
-)
+# Import custom styles
+from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
-# =====================================================
-# INITIALIZATION
-# =====================================================
-
-init_user_db()
-
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-if "username" not in st.session_state:
-    st.session_state["username"] = None
-if "role" not in st.session_state:
-    st.session_state["role"] = None
-if "last_active" not in st.session_state:
-    st.session_state["last_active"] = None
-
-
-# =====================================================
-# SESSION TIMEOUT
-# =====================================================
-
-SESSION_TIMEOUT = 30 * 60  # 30 minutes
-
-def session_timed_out():
-    last = st.session_state["last_active"]
-    if not last:
-        return False
-    return (datetime.now() - datetime.fromisoformat(last)).total_seconds() > SESSION_TIMEOUT
-
-
-if st.session_state["authenticated"] and session_timed_out():
-    st.warning("Session expired. Please log in again.")
-    st.session_state["authenticated"] = False
-    st.rerun()
-
-
-# =====================================================
-# LOGIN FLOW
-# =====================================================
-
-if not st.session_state["authenticated"]:
-    login_router()
-    st.stop()
-
-# AFTER LOGIN SUCCESS
-username = st.session_state["username"]
-role = st.session_state["role"]
-st.session_state["last_active"] = datetime.now().isoformat()
-
-# Restore Streamlit layout so sidebar + main UI works
-restore_default_layout()
-
-# Apply theme AFTER restoring layout
+# ===============================
+# Apply Styles
+# ===============================
 apply_theme()
 apply_layout_styles()
-apply_global_css()
+apply_global_css()   # ✅ apply CSS globally
 
+# ===============================
+# Page Config
+# ===============================
+st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
+
+# Background + Logo
 set_background("bg1.jpg")
 show_logo("logo.png")
 
-
 st.title("💊 Medicine Safety Comparator")
 
-
-# =====================================================
-# SIDEBAR
-# =====================================================
-
-def render_avatar(username, size=72):
-    png = os.path.join("avatars", f"{username}.png")
-    jpg = os.path.join("avatars", f"{username}.jpg")
-
-    if os.path.exists(png):
-        st.sidebar.image(png, width=size)
-        return
-    if os.path.exists(jpg):
-        st.sidebar.image(jpg, width=size)
-        return
-
-    initials = "".join([p[0] for p in username.split()][:2]).upper()
-    st.sidebar.markdown(
-        f"""
-        <div style="
-            width:{size}px;height:{size}px;border-radius:50%;
-            background: linear-gradient(135deg,#2E86C1,#5DADE2);
-            display:flex;align-items:center;justify-content:center;
-            font-size:{size//2}px;font-weight:bold;color:white;">
-            {initials}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
+# ===============================
+# Sidebar Navigation
+# ===============================
 with st.sidebar:
-    st.markdown("<h3 style='color:#2E86C1;'>MedSafe AI</h3>", unsafe_allow_html=True)
-
-    render_avatar(username)
-
-    st.write(f"**{username}**")
-    st.write(f"Role: **{role}**")
+    st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
+    menu = st.radio("📌 Navigation", ["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
     st.markdown("---")
-
-    if st.button("Logout 🔒"):
-        st.session_state["authenticated"] = False
-        st.rerun()
-
-    if role == "admin":
-        menu = st.radio("📌 Navigation",
-                        ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
-    elif role == "pharmacist":
-        menu = st.radio("📌 Navigation",
-                        ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
-    else:
-        menu = st.radio("📌 Navigation", ["📦 Inventory"])
-
-    st.markdown("---")
+    st.write("ℹ Version 1.0.0")
     st.write("© 2025 MedSafe AI")
 
 # ===============================
@@ -659,26 +556,3 @@ elif menu == "📦 Inventory":
     except Exception as e:
         st.error(f"⚠ Could not process inventory: {e}")
         st.info("Try deleting or fixing the CSV files if the issue persists.")
-
-# ===============================
-# STEP 6 — PASSWORD RESET PAGE
-# ===============================
-
-if menu == "🔑 Change Password":
-    from password_reset import password_reset
-    password_reset(username)
-    st.stop()
-
-    new_pass = st.text_input("Enter New Password", type="password")
-    confirm_pass = st.text_input("Confirm New Password", type="password")
-
-    if st.button("Update Password"):
-        if not new_pass or not confirm_pass:
-            st.warning("Please fill all fields.")
-        elif new_pass != confirm_pass:
-            st.error("Passwords do not match!")
-        else:
-            update_password(username, new_pass)
-            st.success("✅ Password updated successfully! Please login again.")
-            st.info("Restart the app or refresh the page to continue.")
-
