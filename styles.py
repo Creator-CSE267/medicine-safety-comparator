@@ -189,3 +189,28 @@ def show_logo(logo_file):
             """,
             unsafe_allow_html=True
         )
+
+
+def fix_login_spacing():
+    """Remove Streamlit default padding that causes the blank top block."""
+    st.markdown("""
+        <style>
+            /* REMOVE all top padding and container spacing */
+            .block-container {
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                margin-top: 0 !important;
+            }
+            header, footer, .stAppHeader {
+                display: none !important;
+            }
+            /* REMOVE that annoying white top block from theme layouts */
+            .st-emotion-cache-18ni7ap {
+                padding-top: 0 !important;
+                margin-top: 0 !important;
+            }
+            .st-emotion-cache-1jicfl2 {
+                padding-top: 0 !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
