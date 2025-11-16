@@ -39,65 +39,93 @@ def login_router():
 # ---------------------------------------------------
 def login_page():
 
-    # ---------- STYLING ----------
     st.markdown("""
         <style>
-            .login-container {
-                width: 420px;
+            body {
+                background-color: #0F1117 !important;
+            }
+            .main {
+                padding: 0 !important;
+            }
+            .login-card {
+                width: 380px;
                 margin: auto;
                 margin-top: 120px;
                 padding: 35px;
-                background: white;
+                background: #1A1C23;
                 border-radius: 18px;
-                box-shadow: 0px 4px 25px rgba(0,0,0,0.25);
+                box-shadow: 0px 4px 25px rgba(0,0,0,0.35);
                 text-align: center;
             }
             .login-title {
-                font-size: 30px;
+                font-size: 28px;
                 font-weight: 800;
                 color: #2E86C1;
-                margin-bottom: 20px;
+                margin-top: 10px;
+                margin-bottom: 25px;
+            }
+            .login-input input {
+                background: #2A2C33 !important;
+                color: white !important;
+                border-radius: 10px !important;
+                border: 1px solid #2E86C1 !important;
+                height: 45px;
+            }
+            .login-btn, .reset-btn {
+                width: 48%;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            .login-row {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 20px;
+            }
+            img {
+                display: block;
+                margin-left: auto;
+                margin-right: auto;
             }
         </style>
     """, unsafe_allow_html=True)
 
-    # ---------- LOGIN BOX ----------
-    st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+    # LOGIN BOX
+    st.markdown("<div class='login-card'>", unsafe_allow_html=True)
 
-    st.image("logo.png", width=140)
+    # Centered logo
+    st.image("logo.png", width=120)
+
+    # Title
     st.markdown("<div class='login-title'>MedSafe Login</div>", unsafe_allow_html=True)
 
-    username = st.text_input("Username", placeholder="Enter username")
-    password = st.text_input("Password", type="password", placeholder="Enter password")
+    # Inputs (short width, centered)
+    username = st.text_input("Username", placeholder="Enter username", key="u_input")
+    password = st.text_input("Password", type="password", placeholder="Enter password", key="p_input")
 
+    # Buttons in a row
     col1, col2 = st.columns(2)
-    login_btn = col1.button("Login")
-    reset_btn = col2.button("Reset Password")
+    login_btn = col1.button("Login", key="login", use_container_width=True)
+    reset_btn = col2.button("Reset Password", key="reset", use_container_width=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---------- RESET PASSWORD ----------
+    # RESET PASSWORD ACTION
     if reset_btn:
-        if username.strip() == "":
-            st.error("Enter your username before resetting password.")
-            return None, None
-
         st.session_state["go_reset_password"] = True
         st.session_state["reset_user"] = username.strip()
-
         st.rerun()
-        return None, None   # stop execution
+        return None, None
 
-    # ---------- LOGIN PROCESS ----------
+    # LOGIN ACTION
     if login_btn:
-
-        # Empty fields
         if username.strip() == "" or password.strip() == "":
             st.error("Please enter both username and password.")
             return None, None
 
-        # Fetch user
         row = get_user(username)
+
         if row is None:
             st.error("User not found.")
             return None, None
@@ -105,18 +133,16 @@ def login_page():
         stored_hash = row[2]
         role = row[3]
 
-        # Wrong password
         if not verify_password(password, stored_hash):
             st.error("Incorrect password.")
             return None, None
 
-        # ---------- LOGIN SUCCESS ----------
+        # SUCCESS
         st.session_state["authenticated"] = True
         st.session_state["username"] = username
         st.session_state["role"] = role
-        st.session_state["last_active"] = datetime.now().isoformat()
-
-        return username, role    # SUCCESS → return to app
-        st.rerun()               # never reached
+        st.rerun()
+        return None, None
 
     return None, None
+
