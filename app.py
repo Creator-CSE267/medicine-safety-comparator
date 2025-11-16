@@ -54,21 +54,30 @@ show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
 
+
 # ===============================
-# Sidebar Navigation
+# ROLE-BASED SIDEBAR NAVIGATION
 # ===============================
+
 with st.sidebar:
-    if role == "admin":
-    menu = st.sidebar.radio("📌 Navigation", ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
-
-elif role == "pharmacist":
-    menu = st.sidebar.radio("📌 Navigation", ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
-
     st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
-    menu = st.radio("📌 Navigation", ["🧪 Testing", "📊 Dashboard", "📦 Inventory"])
+
+    if role == "admin":
+        menu = st.radio(
+            "📌 Navigation",
+            ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"]
+        )
+
+    elif role == "pharmacist":
+        menu = st.radio(
+            "📌 Navigation",
+            ["🧪 Testing", "📦 Inventory", "🔑 Change Password"]
+        )
+
     st.markdown("---")
-    st.write("ℹ Version 1.0.0")
+    st.write(f"👤 Logged in as: **{username}** ({role})")
     st.write("© 2025 MedSafe AI")
+
 
 # ===============================
 # File Paths
