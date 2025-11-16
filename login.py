@@ -10,7 +10,9 @@ from styles import fix_login_spacing
 # PROFESSIONAL LOGIN PAGE
 # ---------------------------------------------------
 def login_page():
-    fix_login_spacing()
+    from styles import disable_all_background_for_login
+disable_all_background_for_login()
+
     # PAGE FIX - remove all Streamlit default spacing
     st.markdown("""
         <style>
