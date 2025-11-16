@@ -1,68 +1,104 @@
-# login.py
 import streamlit as st
-from user_database import init_user_db, get_user, verify_password
-from typing import Tuple
+from user_database import get_user, verify_password
 
-# Re-export init_user_db so app.py can import it from login
-__all__ = ["init_user_db", "login_page"]
+def login_page():
+    st.markdown("""
+        <style>
+            .login-container {
+                max-width: 420px;
+                margin: auto;
+                margin-top: 90px;
+                padding: 35px;
+                background: white;
+                border-radius: 18px;
+                box-shadow: 0px 4px 25px rgba(0,0,0,0.15);
+                text-align: center;
+            }
+            .login-title {
+                font-size: 28px;
+                font-weight: 700;
+                color: #2E86C1;
+                margin-bottom: 15px;
+            }
+            .login-input input {
+                border-radius: 10px !important;
+                border: 2px solid #2E86C1 !important;
+            }
+            .login-btn {
+                width: 100%;
+                border-radius: 10px;
+                padding: 10px;
+                font-size: 16px;
+                font-weight: 600;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-def _ensure_session():
-    if "logged_in" not in st.session_state:
-        st.session_state["logged_in"] = False
-    if "username" not in st.session_state:
-        st.session_state["username"] = None
-    if "role" not in st.session_state:
-        st.session_state["role"] = None
+    # Centered Login Box
+    with st.container():
 
+        st.markdown("<div class='login-container'>", unsafe_allow_html=True)
 
-def logout():
-    """Clear session login keys and rerun"""
-    for k in ["logged_in", "username", "role"]:
-        if k in st.session_state:
-            del st.session_state[k]
-    st.rerun()
+        # LOGO
+        st.image("logo.png", width=120)
 
+        st.markdown("<div class='login-title'>User Login</div>", unsafe_allow_html=True)
 
-def login_page() -> Tuple[str, str]:
-    """
-    Show login UI. If user is already logged in in session_state, return (username, role).
-    Otherwise show login form and return (None, None) after stopping the app so the
-    main app does not proceed until login.
-    """
-    _ensure_session()
+        # Username Input
+        username = st.text_input("Username", key="login_username", placeholder="Enter username")
 
-    # If already logged in, show sidebar logout and return credentials
-    if st.session_state.get("logged_in"):
-        # show logout in sidebar
-        if st.sidebar.button("Logout"):
-            logout()
-        return st.session_state.get("username"), st.session_state.get("role")
+        # Password Input
+        password = st.text_input("Password", type="password", key="login_password", placeholder="Enter password")
 
-    st.title("🔐 MedSafe AI — Login")
+        # Buttons layout
+        col1, col2, col3 = st.columns(3)
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-    with col2:
-        if st.button("Login"):
-            if not username or not password:
-                st.error("Enter both username and password.")
-            else:
-                row = get_user(username)
-                if row is None:
-                    st.error("Invalid username or password.")
-                else:
-                    stored_hash = row[2]
-                    if verify_password(password, stored_hash):
-                        st.success("Login successful.")
-                        st.session_state["logged_in"] = True
-                        st.session_state["username"] = row[0]
-                        st.session_state["role"] = row[3]
-                        st.rerun()
-                    else:
-                        st.error("Invalid username or password.")
+        login_btn = col1.button("Login")
+        reset_btn = col2.button("Reset")
+        change_btn = col3.button("Change Password")
 
-    # Not logged in yet -> stop app so the rest of app doesn't run
-    st.stop()
-    return None, None  # unreachable, but explicit
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # RESET clears fields
+    if reset_btn:
+        st.session_state["login_username"] = ""
+        st.session_state["login_password"] = ""
+        st.rerun()
+
+    # Change Password Flow
+    if change_btn:
+        st.session_state["go_reset_password"] = True
+        st.rerun()
+
+    # HANDLE LOGIN
+    if login_btn:
+        if not username or not password:
+            st.error("Please enter both username and password.")
+            return None, None
+
+        row = get_user(username)
+
+        if row is None:
+            st.error("Invalid username.")
+            return None, None
+
+        stored_hash = row[2]
+
+        if verify_password(password, stored_hash):
+            st.success("Login successful.")
+
+            # Save session state
+            st.session_state["logged_in"] = True
+            st.session_state["username"] = row[0]
+            st.session_state["role"] = row[3]
+
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+
+    # If not logged in
+    if "logged_in" not in st.session_state or not st.session_state["logged_in"]:
+        return None, None
+
+    # Return successful login
+    return st.session_state["username"], st.session_state["role"]
