@@ -71,7 +71,7 @@ if st.session_state["authenticated"] and session_is_timed_out():
     st.session_state["role"] = None
     st.session_state["last_active"] = None
     # rerun to show login
-    st.experimental_rerun()
+    st.rerun()
 
 # --------------------
 # If not authenticated → show login
@@ -157,7 +157,7 @@ with st.sidebar:
         st.session_state["role"] = None
         st.session_state["last_active"] = None
         st.success("Logged out. Redirecting to login...")
-        st.experimental_rerun()
+        st.rerun()
 
     # role-based menu
     if role == "admin":
