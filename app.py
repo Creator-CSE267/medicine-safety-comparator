@@ -1,4 +1,5 @@
 # app.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -20,13 +21,11 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 
-# ------------ Login system imports (local modules) ------------
-from login import login_router        # updated router that sets last_active
+# 🔹 Login system imports
+from login import login_router
 from user_database import init_user_db
 from password_reset import password_reset
 
-# ------------ App styling helpers (your file) ------------
-from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
 # --------------------
 # Config (tweakable)
