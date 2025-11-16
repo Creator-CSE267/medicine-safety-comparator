@@ -20,7 +20,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 # Login system imports
-from login import login_page
+from login import login_router
 from user_database import init_user_db
 from password_reset import password_reset
 
@@ -42,15 +42,14 @@ apply_global_css()   # ✅ apply CSS globally
 # Page Config
 # ===============================
 st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
-# Initialize the users DB (creates default users if not present)
+# Initialize user database
 init_user_db()
 
-# Show login and obtain username, role (login_page will stop the app until login)
-username, role = login_page()
-# Handle change password
-if "go_reset_password" in st.session_state and st.session_state["go_reset_password"]:
-    password_reset(username)
+# Handle login
+username, role = login_router()
+if "authenticated" not in st.session_state or not st.session_state["authenticated"]:
     st.stop()
+
 
 # If login fails, stop the app
 if username is None:
@@ -70,17 +69,19 @@ st.title("💊 Medicine Safety Comparator")
 with st.sidebar:
     st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
 
-    if role == "admin":
-        menu = st.radio(
-            "📌 Navigation",
-            ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"]
-        )
+     if role == "admin":
+        menu = st.radio("📌 Navigation", [
+            "📊 Dashboard",
+            "📦 Inventory",
+            "🔑 Change Password"
+        ])
 
     elif role == "pharmacist":
-        menu = st.radio(
-            "📌 Navigation",
-            ["🧪 Testing", "📦 Inventory", "🔑 Change Password"]
-        )
+        menu = st.radio("📌 Navigation", [
+            "🧪 Testing",
+            "📦 Inventory",
+            "🔑 Change Password"
+        ])
 
     st.markdown("---")
     st.write(f"👤 Logged in as: **{username}** ({role})")
@@ -598,7 +599,9 @@ elif menu == "📦 Inventory":
 # ===============================
 
 if menu == "🔑 Change Password":
-    st.header("🔑 Change Your Password")
+    from password_reset import password_reset
+    password_reset(username)
+    st.stop()
 
     new_pass = st.text_input("Enter New Password", type="password")
     confirm_pass = st.text_input("Confirm New Password", type="password")
