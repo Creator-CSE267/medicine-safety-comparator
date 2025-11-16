@@ -39,18 +39,22 @@ def login_router():
 # ---------------------------------------------------
 def login_page():
 
+    # PAGE FIX - remove all Streamlit default spacing
     st.markdown("""
         <style>
-            /* REMOVE ALL DEFAULT TOP MARGINS / PADDING */
+            /* REMOVE STREAMLIT TOP SPACING */
             .block-container {
-                padding-top: 0rem !important;
-                margin-top: 0rem !important;
+                padding-top: 0 !important;
+                margin-top: 0 !important;
             }
-            header, footer {
+            header[data-testid="stHeader"] {
+                display: none !important;
+            }
+            footer {
                 visibility: hidden !important;
             }
 
-            /* FULLSCREEN CENTERING */
+            /* FULLSCREEN CENTER */
             .full-page {
                 display: flex;
                 flex-direction: column;
@@ -60,7 +64,7 @@ def login_page():
                 width: 100%;
             }
 
-            /* LOGIN CARD */
+            /* LOGIN BOX */
             .login-card {
                 width: 380px;
                 padding: 35px;
@@ -70,60 +74,84 @@ def login_page():
                 text-align: center;
             }
 
+            /* TITLE */
             .login-title {
                 font-size: 28px;
                 font-weight: 800;
                 color: #2E86C1;
-                margin-top: 12px;
+                margin-top: 10px;
                 margin-bottom: 25px;
             }
 
+            /* INPUT BOXES */
             .login-input input {
                 background: #2A2C33 !important;
                 color: white !important;
                 border-radius: 10px !important;
                 border: 1px solid #2E86C1 !important;
-                height: 45px;
+                height: 45px !important;
             }
 
-            .login-btn, .reset-btn {
-                width: 48%;
-                border-radius: 8px;
-                padding: 10px;
-                font-size: 15px;
+            /* BUTTONS */
+            .login-btn {
+                width: 100%;
+                background: #2E86C1 !important;
+                color: white !important;
+                border-radius: 8px !important;
+                padding: 10px 0;
+                font-size: 16px;
                 font-weight: 600;
+                margin-top: 5px;
+            }
+            .reset-btn {
+                width: 100%;
+                background: #444 !important;
+                color: #fff !important;
+                border-radius: 8px !important;
+                padding: 10px 0;
+                font-size: 16px;
+                font-weight: 600;
+                margin-top: 8px;
             }
 
         </style>
-        <div class='full-page'>
-            <div class='login-card'>
     """, unsafe_allow_html=True)
 
-    # Logo (centered)
+    # -----------------------
+    # HTML WRAPPER START
+    # -----------------------
+    st.markdown("<div class='full-page'><div class='login-card'>", unsafe_allow_html=True)
+
+    # LOGO
     st.image("logo.png", width=120)
 
-    # Title
+    # TITLE
     st.markdown("<div class='login-title'>MedSafe Login</div>", unsafe_allow_html=True)
 
-    # Inputs
+    # -----------------------
+    # INPUTS
+    # -----------------------
     username = st.text_input("Username", placeholder="Enter username")
     password = st.text_input("Password", type="password", placeholder="Enter password")
 
-    # Buttons in one row
-    col1, col2 = st.columns(2)
-    login_btn = col1.button("Login", use_container_width=True)
-    reset_btn = col2.button("Reset Password", use_container_width=True)
+    # -----------------------
+    # BUTTONS
+    # -----------------------
+    login_btn = st.button("Login", key="login_btn", help="Login", use_container_width=True)
+    reset_btn = st.button("Reset Password", key="reset_btn", help="Change password", use_container_width=True)
 
-    # Close HTML containers
+    # -----------------------
+    # HTML WRAPPER END
+    # -----------------------
     st.markdown("</div></div>", unsafe_allow_html=True)
 
-    # RESET PASSWORD
+    # RESET PASSWORD BUTTON
     if reset_btn:
         st.session_state["go_reset_password"] = True
         st.session_state["reset_user"] = username.strip()
         st.rerun()
 
-    # LOGIN
+    # LOGIN ACTION
     if login_btn:
         if username.strip() == "" or password.strip() == "":
             st.error("Please enter both username and password.")
@@ -134,15 +162,21 @@ def login_page():
             st.error("User not found.")
             return None, None
 
-        if not verify_password(password, row[2]):
+        stored_hash = row[2]
+        role = row[3]
+
+        if not verify_password(password, stored_hash):
             st.error("Incorrect password.")
             return None, None
 
+        # SUCCESS
         st.session_state["authenticated"] = True
         st.session_state["username"] = username
-        st.session_state["role"] = row[3]
+        st.session_state["role"] = role
+        st.session_state["last_active"] = datetime.now().isoformat()
         st.rerun()
 
     return None, None
+
 
 
