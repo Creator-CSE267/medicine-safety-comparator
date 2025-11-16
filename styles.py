@@ -166,36 +166,38 @@ def show_logo(logo_file):
 # RESTORE FULL LAYOUT AFTER LOGIN
 # ====================================
 def restore_default_layout():
-    """Re-enable Streamlit's normal layout after login page removed it."""
+    """
+    Restores normal Streamlit padding/layout AFTER login.
+    Removes ONLY the login-specific overrides.
+    Safe for dashboard, sidebar, KPI, tabs, charts.
+    """
     st.markdown("""
         <style>
-            /* restore normal layout padding */
+            /* Restore Streamlit container spacing */
             .block-container {
                 padding-top: 1rem !important;
-                padding-bottom: 1rem !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
             }
 
-            /* allow header/footer again */
+            /* Restore header (if needed later) */
             header[data-testid="stHeader"] {
                 display: block !important;
                 height: auto !important;
             }
 
-            footer {
-                visibility: visible !important;
+            /* Restore toolbar spacing */
+            div[data-testid="stToolbar"] {
+                display: flex !important;
             }
 
-            /* enable all main wrappers */
+            /* Restore safe margins */
             .stApp {
-                padding: initial !important;
-                margin: initial !important;
+                padding-top: 0 !important;
+                margin-top: 0 !important;
                 background: transparent !important;
-            }
-
-            [data-testid="stDecoration"],
-            [data-testid="stToolbar"] {
-                display: block !important;
             }
         </style>
     """, unsafe_allow_html=True)
+
 
