@@ -93,56 +93,44 @@ def apply_layout_styles():
 # GLOBAL CSS — SAFE FOR LOGIN PAGE
 # ===============================
 def apply_global_css():
-    """Extra styling + login-safe layout (removes blank box)."""
     st.markdown("""
         <style>
 
-            /* REMOVE TOP GAP (FIXES WHITE BOX ON LOGIN PAGE) */
-            .block-container {
-                padding-top: 0 !important;
-                margin-top: 0 !important;
-            }
+        /* Remove any default padding that creates blank area */
+        .block-container {
+            padding-top: 0rem !important;
+        }
 
-            /* REMOVE STREAMLIT DEFAULT HEADER */
-            header, footer {
-                visibility: hidden !important;
-                height: 0 !important;
-            }
+        /* Remove Streamlit top blank spacer */
+        div[data-testid="stDecoration"] {
+            display: none !important;
+        }
 
-            /* Dashboard headings */
-            .main-title {
-                font-size: 28px;
-                font-weight: bold;
-                color: #111111;
-                margin-bottom: 20px;
-            }
-            .section-header {
-                font-size: 20px;
-                font-weight: bold;
-                margin-top: 25px;
-                margin-bottom: 10px;
-                color: #222222;
-            }
+        div[data-testid="stToolbar"] {
+            display: none !important;
+        }
 
-            /* Soft card */
-            .card {
-                background: #f9f9f9;
-                padding: 15px;
-                border-radius: 12px;
-                margin-bottom: 15px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
+        header[data-testid="stHeader"] {
+            height: 0px !important;
+            display: none !important;
+        }
 
-            /* Form Labels */
-            label, .stTextInput label, .stNumberInput label, 
-            .stDateInput label, .stSelectbox label, .stTextArea label {
-                color: #111111 !important;
-                font-weight: 600 !important;
-                font-size: 16px !important;
-            }
+        /* Login box centering */
+        .login-container {
+            max-width: 420px !important;
+            margin: auto !important;
+            margin-top: 60px !important;
+        }
+
+        .main-title {
+            font-size: 28px;
+            font-weight: bold;
+            color: #ffffff;
+        }
 
         </style>
     """, unsafe_allow_html=True)
+
 
 
 # ===============================
