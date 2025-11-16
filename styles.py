@@ -160,3 +160,42 @@ def show_logo(logo_file):
             <img src="data:image/png;base64,{encoded}" width="130">
         </div>
     """, unsafe_allow_html=True)
+
+
+# ====================================
+# RESTORE FULL LAYOUT AFTER LOGIN
+# ====================================
+def restore_default_layout():
+    """Re-enable Streamlit's normal layout after login page removed it."""
+    st.markdown("""
+        <style>
+            /* restore normal layout padding */
+            .block-container {
+                padding-top: 1rem !important;
+                padding-bottom: 1rem !important;
+            }
+
+            /* allow header/footer again */
+            header[data-testid="stHeader"] {
+                display: block !important;
+                height: auto !important;
+            }
+
+            footer {
+                visibility: visible !important;
+            }
+
+            /* enable all main wrappers */
+            .stApp {
+                padding: initial !important;
+                margin: initial !important;
+                background: transparent !important;
+            }
+
+            [data-testid="stDecoration"],
+            [data-testid="stToolbar"] {
+                display: block !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
