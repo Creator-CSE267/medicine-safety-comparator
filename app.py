@@ -113,8 +113,7 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 apply_theme()
 apply_layout_styles()
 apply_global_css()
-set_background("bg1.jpg")
-show_logo("logo.png")
+
 
 
 st.set_page_config(page_title="Medicine Safety Comparator",
