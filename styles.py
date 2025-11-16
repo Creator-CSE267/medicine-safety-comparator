@@ -166,58 +166,41 @@ def apply_global_css():
 # BACKGROUND (ONLY AFTER LOGIN)
 # ===============================
 def set_background(image_file):
-    """Modern background that DOES NOT create top blank container."""
+    """Full-page BG without affecting Streamlit layout or sidebar."""
     if not os.path.exists(image_file):
         return
 
     with open(image_file, "rb") as f:
         encoded = base64.b64encode(f.read()).decode()
 
-    css = f"""
-    <style>
-        /* Full-page fixed background */
-        body {{
-            background-image: url("data:image/jpg;base64,{encoded}");
-            background-size: cover;
-            background-repeat: no-repeat;
-            background-attachment: fixed;
-            background-position: center;
-            margin: 0 !important;
-            padding: 0 !important;
-        }}
+    st.markdown(
+        f"""
+        <style>
+            /* Safe background that DOES NOT override layout */
+            .stApp {{
+                background: none !important;
+            }}
 
-        /* Remove ALL Streamlit extra wrappers that add blank space */
-        .block-container {{
-            padding: 0 !important;
-            margin: 0 !important;
-        }}
+            body {{
+                background-image: url("data:image/png;base64,{encoded}");
+                background-size: cover;
+                background-repeat: no-repeat;
+                background-position: center;
+                background-attachment: fixed;
+            }}
 
-        .stApp {{
-            background: transparent !important;
-            padding: 0 !important;
-            margin: 0 !important;
-        }}
+            /* Do NOT hide Streamlit containers */
+            header {{
+                display: block !important;
+            }}
+            [data-testid="stHeader"] {{
+                display: block !important;
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
-        header, footer {{
-            display: none !important;
-            height: 0 !important;
-        }}
-
-        .main > div {{
-            padding-top: 0 !important;
-            margin-top: 0 !important;
-        }}
-
-        /* Delete that top ghost container Streamlit renders */
-        [data-testid="stDecoration"] {{
-            display: none !important;
-        }}
-        [data-testid="stHeader"] {{
-            display: none !important;
-        }}
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
 
 
 
