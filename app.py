@@ -24,6 +24,25 @@ from login import login_router
 from user_database import init_user_db
 from password_reset import password_reset
 
+# ===============================
+# INITIALIZE DB
+# ===============================
+init_user_db()
+
+# ===============================
+# AUTH CHECK — MUST BE FIRST
+# ===============================
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# If NOT logged in → show login router
+if not st.session_state["authenticated"]:
+    username, role = login_router()
+    st.stop()
+
+# Already logged in → read session values
+username = st.session_state["username"]
+role = st.session_state["role"]
 
 
 
@@ -32,16 +51,16 @@ from password_reset import password_reset
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
 # ===============================
-# Apply Styles
+# Apply Styles (AFTER LOGIN)
 # ===============================
 apply_theme()
 apply_layout_styles()
-apply_global_css()   # ✅ apply CSS globally
+apply_global_css()
 
-# ===============================
-# Page Config
-# ===============================
-st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
+st.set_page_config(page_title="Medicine Safety Comparator",
+                   page_icon="💊",
+                   layout="wide")
+
 # Initialize user database
 init_user_db()
 
@@ -66,29 +85,21 @@ st.title("💊 Medicine Safety Comparator")
 
 
 # ===============================
-# ROLE-BASED SIDEBAR NAVIGATION
+# ROLE-BASED SIDEBAR
 # ===============================
+with st.sidebar:
+    st.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
 
-st.sidebar.markdown("<h2 style='color:#2E86C1;'>MedSafe AI</h2>", unsafe_allow_html=True)
+    if role == "admin":
+        menu = st.radio("📌 Navigation",
+                        ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
 
-# ---- ROLE BASED MENU ----
-if role == "admin":
-    menu = st.sidebar.radio("📌 Navigation", [
-        "📊 Dashboard",
-        "📦 Inventory",
-        "🔑 Change Password"
-    ])
+    elif role == "pharmacist":
+        menu = st.radio("📌 Navigation",
+                        ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
 
-elif role == "pharmacist":
-    menu = st.sidebar.radio("📌 Navigation", [
-        "🧪 Testing",
-        "📦 Inventory",
-        "🔑 Change Password"
-    ])
-
-# ---- FOOTER ----
-st.sidebar.markdown("---")
-st.sidebar.write(f"👤 Logged in as: **{username}** ({role})")
+    st.markdown("---")
+    st.write(f"👤 Logged in as: **{username}** ({role})")
 st.sidebar.write("© 2025 MedSafe AI")
 
 
