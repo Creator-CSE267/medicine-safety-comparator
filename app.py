@@ -74,18 +74,21 @@ if st.session_state["authenticated"] and session_is_timed_out():
     st.experimental_rerun()
 
 # --------------------
-# If not authenticated -> show login UI and stop
+# If not authenticated → show login
 # --------------------
 if not st.session_state["authenticated"]:
-    # login_router will render login or password reset UI and set session_state on success
+    # login_router renders the login UI and sets session_state on success
+    username, role = login_router()
+    # Make sure we stop here so the app only shows login until auth completes
     st.stop()
 
-# From here the user is authenticated
+# From here the user is authenticated (login_router should set these)
 username = st.session_state.get("username")
 role = st.session_state.get("role")
 
 # update last_active on every new run after login (activity)
 st.session_state["last_active"] = datetime.now().isoformat()
+
 
 # --------------------
 # Apply styles AFTER login (so login UI isn't affected)
