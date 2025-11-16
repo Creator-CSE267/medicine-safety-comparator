@@ -1,4 +1,3 @@
-# styles.py
 import streamlit as st
 import base64
 from PIL import Image
@@ -89,15 +88,32 @@ def apply_layout_styles():
         </style>
     """, unsafe_allow_html=True)
 
+
+# ===============================
+# GLOBAL CSS — SAFE FOR LOGIN PAGE
+# ===============================
 def apply_global_css():
-    """Extra global CSS for dashboard/inventory cards and form labels (dark style)."""
+    """Extra styling + login-safe layout (removes blank box)."""
     st.markdown("""
         <style>
-            /* --- Titles and Sections --- */
+
+            /* REMOVE TOP GAP (FIXES WHITE BOX ON LOGIN PAGE) */
+            .block-container {
+                padding-top: 0 !important;
+                margin-top: 0 !important;
+            }
+
+            /* REMOVE STREAMLIT DEFAULT HEADER */
+            header, footer {
+                visibility: hidden !important;
+                height: 0 !important;
+            }
+
+            /* Dashboard headings */
             .main-title {
                 font-size: 28px;
                 font-weight: bold;
-                color: #111111;  /* Dark text */
+                color: #111111;
                 margin-bottom: 20px;
             }
             .section-header {
@@ -105,8 +121,10 @@ def apply_global_css():
                 font-weight: bold;
                 margin-top: 25px;
                 margin-bottom: 10px;
-                color: #222222;  /* Darker text */
+                color: #222222;
             }
+
+            /* Soft card */
             .card {
                 background: #f9f9f9;
                 padding: 15px;
@@ -115,22 +133,23 @@ def apply_global_css():
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }
 
-            /* --- Form Labels (Text, Number, Date, Select etc.) --- */
+            /* Form Labels */
             label, .stTextInput label, .stNumberInput label, 
             .stDateInput label, .stSelectbox label, .stTextArea label {
-                color: #111111 !important;   /* Dark black */
+                color: #111111 !important;
                 font-weight: 600 !important;
                 font-size: 16px !important;
             }
+
         </style>
     """, unsafe_allow_html=True)
 
 
 # ===============================
-# Background & Logo
+# BACKGROUND (ONLY AFTER LOGIN)
 # ===============================
 def set_background(image_file):
-    """Set background image for app."""
+    """Set background image AFTER LOGIN ONLY."""
     if not os.path.exists(image_file):
         return
     with open(image_file, "rb") as f:
@@ -145,28 +164,26 @@ def set_background(image_file):
             background-position: center;
             background-attachment: fixed;
         }}
-        .block-container {{
-            background: transparent !important;
-        }}
         </style>
         """,
         unsafe_allow_html=True
     )
 
+
+# ===============================
+# LOGO — CENTERED FOR DASHBOARD ONLY
+# ===============================
 def show_logo(logo_file):
-    """Display logo centered and slightly higher if exists."""
+    """Centered logo for dashboard (NOT for login)."""
     if os.path.exists(logo_file):
-        import base64
         with open(logo_file, "rb") as f:
             encoded = base64.b64encode(f.read()).decode()
 
-        # Centered logo with upward shift
         st.markdown(
             f"""
-            <div style="display: flex; justify-content: center; margin-top: -40px; margin-bottom: 20px;">
-                <img src="data:image/png;base64,{encoded}" width="250">
+            <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 20px;">
+                <img src="data:image/png;base64,{encoded}" width="220">
             </div>
             """,
             unsafe_allow_html=True
         )
-
