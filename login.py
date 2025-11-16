@@ -20,7 +20,7 @@ def logout():
     for k in ["logged_in", "username", "role"]:
         if k in st.session_state:
             del st.session_state[k]
-    st.experimental_rerun()
+    st.rerun()
 
 
 def login_page() -> Tuple[str, str]:
