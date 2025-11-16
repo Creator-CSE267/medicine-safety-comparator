@@ -7,6 +7,24 @@ import os
 # ===============================
 # Theme & Layout
 # ===============================
+def disable_all_background_for_login():
+    """Remove all backgrounds & padding ONLY for login screen."""
+    import streamlit as st
+    st.markdown("""
+        <style>
+            .stApp, .block-container {
+                background: transparent !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
+            header, footer, [data-testid="stToolbar"],
+            [data-testid="stDecoration"], [data-testid="stHeader"] {
+                display: none !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
 def apply_theme():
     """Initialize session state theme values."""
     if "theme_choice" not in st.session_state:
