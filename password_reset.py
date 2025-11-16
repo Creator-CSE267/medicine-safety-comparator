@@ -1,23 +1,44 @@
 # password_reset.py
 import streamlit as st
-from user_database import update_password
-from passlib.context import CryptContext
+from user_database import get_user, update_password, verify_password
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+def password_reset(username: str):
+    """
+    Allows a logged-in user to change their password.
+    Requires current password for verification.
+    """
+    st.header("🔑 Change / Reset Password")
 
+    if not username:
+        st.error("No user logged in.")
+        return
 
-def password_reset(username):
-    st.header("🔑 Change Your Password")
+    st.write(f"User: **{username}**")
 
-    old_pw = st.text_input("Current Password", type="password")
-    new_pw = st.text_input("New Password", type="password")
-    confirm_pw = st.text_input("Confirm New Password", type="password")
+    curr = st.text_input("Current password", type="password")
+    new = st.text_input("New password", type="password")
+    confirm = st.text_input("Confirm new password", type="password")
 
     if st.button("Update Password"):
-        if new_pw != confirm_pw:
-            st.error("❌ New passwords do not match")
+        if not curr or not new or not confirm:
+            st.warning("Please fill all fields.")
+            return
+        if new != confirm:
+            st.error("New passwords do not match.")
             return
 
-        new_hash = pwd_context.hash(new_pw)
-        update_password(username, new_hash)
-        st.success("✅ Password updated successfully")
+        row = get_user(username)
+        if row is None:
+            st.error("User not found.")
+            return
+
+        stored_hash = row[2]
+        if not verify_password(curr, stored_hash):
+            st.error("Current password is incorrect.")
+            return
+
+        ok = update_password(username, new)
+        if ok:
+            st.success("✅ Password updated successfully. Please log out and login again.")
+        else:
+            st.error("⚠️ Could not update password. Try again.")
