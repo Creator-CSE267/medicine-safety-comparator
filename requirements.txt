@@ -11,4 +11,6 @@ Pillow
 opencv-python-headless
 pyzxing
 SQLAlchemy>=2.0.19
+passlib
+streamlit-cookies-manager
 
