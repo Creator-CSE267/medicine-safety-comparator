@@ -3,6 +3,35 @@ import base64
 from PIL import Image
 import os
 
+def disable_all_background_for_login():
+    """Completely remove background, padding, container spacing on login screen."""
+    st.markdown("""
+        <style>
+            .stApp, .block-container {
+                background: transparent !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
+            [data-testid="stAppViewBlockContainer"] {
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
+            header, footer {
+                display: none !important;
+            }
+
+            /* Remove Streamlit's ghost top padding container */
+            [data-testid="stDecoration"] {
+                display: none !important;
+            }
+            [data-testid="stHeader"] {
+                display: none !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
 # ===============================
 # Theme & Layout
 # ===============================
