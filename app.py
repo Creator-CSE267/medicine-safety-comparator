@@ -19,9 +19,9 @@ import io
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
-from user_database import init_user_db
-from login import login_page, init_user_db, password_reset
+from login import login_page, init_user_db
 from password_reset import password_reset
+
 
 
 # Import custom styles
@@ -38,11 +38,12 @@ apply_global_css()   # ✅ apply CSS globally
 # Page Config
 # ===============================
 st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
-# Initialize login database
+# Initialize the users DB (creates default users if not present)
 init_user_db()
 
-# Show Login Page
+# Show login and obtain username, role (login_page will stop the app until login)
 username, role = login_page()
+
 
 # If login fails, stop the app
 if username is None:
