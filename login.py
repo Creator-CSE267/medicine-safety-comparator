@@ -2,35 +2,7 @@ import streamlit as st
 from user_database import get_user, verify_password
 from password_reset import password_reset
 from datetime import datetime
-
-
-# ---------------------------------------------------
-# ROUTER (controls login → reset password → return role)
-# ---------------------------------------------------
-def login_router():
-
-    # Initialize required session states
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
-
-    if "go_reset_password" not in st.session_state:
-        st.session_state["go_reset_password"] = False
-
-    # 1️⃣ RESET PASSWORD PAGE
-    if st.session_state["go_reset_password"]:
-        username = st.session_state.get("reset_user", "")
-        password_reset(username)
-        return None, None
-
-    # 2️⃣ ALREADY LOGGED-IN USER
-    if st.session_state["authenticated"]:
-        return (
-            st.session_state["username"],
-            st.session_state["role"]
-        )
-
-    # 3️⃣ OTHERWISE, SHOW LOGIN PAGE
-    return login_page()
+from styles import fix_login_spacing
 
 
 
@@ -38,7 +10,7 @@ def login_router():
 # PROFESSIONAL LOGIN PAGE
 # ---------------------------------------------------
 def login_page():
-
+    fix_login_spacing()
     # PAGE FIX - remove all Streamlit default spacing
     st.markdown("""
         <style>
@@ -177,6 +149,37 @@ def login_page():
         st.rerun()
 
     return None, None
+# ---------------------------------------------------
+# ROUTER (controls login → reset password → return role)
+# ---------------------------------------------------
+def login_router():
+
+    # Initialize required session states
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+
+    if "go_reset_password" not in st.session_state:
+        st.session_state["go_reset_password"] = False
+
+    # 1️⃣ RESET PASSWORD PAGE
+    if st.session_state["go_reset_password"]:
+        username = st.session_state.get("reset_user", "")
+        password_reset(username)
+        return None, None
+
+    # 2️⃣ ALREADY LOGGED-IN USER
+    if st.session_state["authenticated"]:
+        return (
+            st.session_state["username"],
+            st.session_state["role"]
+        )
+
+    # 3️⃣ OTHERWISE, SHOW LOGIN PAGE
+    return login_page()
+
+
+
+
 
 
 
