@@ -89,13 +89,33 @@ role = st.session_state.get("role")
 # update last_active on every new run after login (activity)
 st.session_state["last_active"] = datetime.now().isoformat()
 
+# =====================================================
+# LOGIN FIRST – NO THEME APPLIED BEFORE AUTHENTICATION
+# =====================================================
+from login import login_router
+from user_database import init_user_db
 
-# --------------------
-# Apply styles AFTER login (so login UI isn't affected)
-# --------------------
+init_user_db()
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# Show login until success
+if not st.session_state["authenticated"]:
+    login_router()
+    st.stop()
+
+# =====================================================
+# ONLY AFTER LOGIN → APPLY FULL THEME + BACKGROUND
+# =====================================================
+from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
+
 apply_theme()
 apply_layout_styles()
 apply_global_css()
+set_background("bg1.jpg")
+show_logo("logo.png")
+
 
 st.set_page_config(page_title="Medicine Safety Comparator",
                    page_icon="💊",
