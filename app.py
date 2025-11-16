@@ -18,15 +18,13 @@ from sklearn.impute import SimpleImputer
 from datetime import datetime, timedelta
 from PIL import Image
 import io
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import A4
-
-# 🔹 Login system imports
-from login import login_router
+# ------------ Login system imports (local modules) ------------
+from login import login_router        # updated router that sets last_active
 from user_database import init_user_db
 from password_reset import password_reset
 
+# ------------ App styling helpers (your file) ------------
+from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
 # --------------------
 # Config (tweakable)
@@ -113,18 +111,13 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 apply_theme()
 apply_layout_styles()
 apply_global_css()
-
+set_background("bg1.jpg")
+show_logo("logo.png")
 
 
 st.set_page_config(page_title="Medicine Safety Comparator",
                    page_icon="💊",
                    layout="wide")
-
-# --------------------
-# Background + Logo (your helpers)
-# --------------------
-set_background("bg1.jpg")
-show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
 
