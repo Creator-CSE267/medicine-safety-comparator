@@ -1,10 +1,12 @@
 import streamlit as st
-from user_database import get_user, verify_password
+from user_database import update_password, verify_password, get_user
+import hashlib
 
-def login_page():
+
+def password_reset(username):
     st.markdown("""
         <style>
-            .login-container {
+            .reset-container {
                 max-width: 420px;
                 margin: auto;
                 margin-top: 90px;
@@ -14,17 +16,17 @@ def login_page():
                 box-shadow: 0px 4px 25px rgba(0,0,0,0.15);
                 text-align: center;
             }
-            .login-title {
-                font-size: 28px;
+            .reset-title {
+                font-size: 26px;
                 font-weight: 700;
                 color: #2E86C1;
-                margin-bottom: 15px;
+                margin-bottom: 20px;
             }
-            .login-input input {
+            .reset-input input {
                 border-radius: 10px !important;
                 border: 2px solid #2E86C1 !important;
             }
-            .login-btn {
+            .reset-btn {
                 width: 100%;
                 border-radius: 10px;
                 padding: 10px;
@@ -34,71 +36,60 @@ def login_page():
         </style>
     """, unsafe_allow_html=True)
 
-    # Centered Login Box
-    with st.container():
+    st.markdown("<div class='reset-container'>", unsafe_allow_html=True)
 
-        st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+    # LOGO
+    st.image("logo.png", width=120)
 
-        # LOGO
-        st.image("logo.png", width=120)
+    st.markdown("<div class='reset-title'>Change Password</div>", unsafe_allow_html=True)
 
-        st.markdown("<div class='login-title'>User Login</div>", unsafe_allow_html=True)
+    # Inputs
+    old_pass = st.text_input("Current Password", type="password", placeholder="Enter current password")
+    new_pass = st.text_input("New Password", type="password", placeholder="Enter new password")
+    confirm_pass = st.text_input("Confirm New Password", type="password", placeholder="Re-enter new password")
 
-        # Username Input
-        username = st.text_input("Username", key="login_username", placeholder="Enter username")
+    # Buttons
+    col1, col2 = st.columns(2)
+    update_btn = col1.button("Update Password")
+    back_btn = col2.button("Back")
 
-        # Password Input
-        password = st.text_input("Password", type="password", key="login_password", placeholder="Enter password")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        # Buttons layout
-        col1, col2, col3 = st.columns(3)
-
-        login_btn = col1.button("Login")
-        reset_btn = col2.button("Reset")
-        change_btn = col3.button("Change Password")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # RESET clears fields
-    if reset_btn:
-        st.session_state["login_username"] = ""
-        st.session_state["login_password"] = ""
+    # Back to login/main menu
+    if back_btn:
+        st.session_state["go_reset_password"] = False
         st.rerun()
 
-    # Change Password Flow
-    if change_btn:
-        st.session_state["go_reset_password"] = True
-        st.rerun()
+    # Update logic
+    if update_btn:
+        if not old_pass or not new_pass or not confirm_pass:
+            st.error("Please fill all fields.")
+            return
 
-    # HANDLE LOGIN
-    if login_btn:
-        if not username or not password:
-            st.error("Please enter both username and password.")
-            return None, None
+        if new_pass != confirm_pass:
+            st.error("New passwords do not match.")
+            return
 
         row = get_user(username)
-
         if row is None:
-            st.error("Invalid username.")
-            return None, None
+            st.error("User not found.")
+            return
 
         stored_hash = row[2]
 
-        if verify_password(password, stored_hash):
-            st.success("Login successful.")
+        if not verify_password(old_pass, stored_hash):
+            st.error("Incorrect current password.")
+            return
 
-            # Save session state
-            st.session_state["logged_in"] = True
-            st.session_state["username"] = row[0]
-            st.session_state["role"] = row[3]
+        # Hash new password
+        new_hash = hashlib.sha256(new_pass.encode()).hexdigest()
 
-            st.rerun()
-        else:
-            st.error("Incorrect password.")
+        # Update DB
+        update_password(username, new_hash)
 
-    # If not logged in
-    if "logged_in" not in st.session_state or not st.session_state["logged_in"]:
-        return None, None
+        st.success("Password updated successfully!")
 
-    # Return successful login
-    return st.session_state["username"], st.session_state["role"]
+        # Logout effect
+        st.session_state.clear()
+        st.info("Please login again with your new password.")
+        st.rerun()
