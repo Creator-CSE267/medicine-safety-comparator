@@ -1,4 +1,3 @@
-# user_database.py
 import sqlite3
 from passlib.context import CryptContext
 from pathlib import Path
@@ -9,15 +8,14 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 def init_user_db():
     """
-    Create the users DB and insert default admin/pharmacist users if they don't exist.
-    Default credentials (change after first login):
-      - admin / admin123
-      - pharmacist / pharma123
+    Creates DB and inserts 2 admin + 6 pharmacists.
+    Runs only once (will NOT overwrite existing users).
     """
-    db_file = Path(DB_PATH)
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
+    # Create table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,58 +26,57 @@ def init_user_db():
         )
     """)
 
-    # Default users (only inserted if username not present)
-    defaults = [
-        ("admin", "Administrator", pwd_context.hash("admin123"), "admin"),
-        ("pharmacist", "Pharmacist User", pwd_context.hash("pharma123"), "pharmacist"),
+    # ---- DEFAULT USERS ----
+    default_admins = [
+        ("admin1", "Admin One", pwd_context.hash("admin123"), "admin"),
+        ("admin2", "Admin Two", pwd_context.hash("admin123"), "admin"),
     ]
 
-    for username, name, pw_hash, role in defaults:
+    default_pharmacists = [
+        ("pharma1", "Pharmacist 01", pwd_context.hash("pharma123"), "pharmacist"),
+        ("pharma2", "Pharmacist 02", pwd_context.hash("pharma123"), "pharmacist"),
+        ("pharma3", "Pharmacist 03", pwd_context.hash("pharma123"), "pharmacist"),
+        ("pharma4", "Pharmacist 04", pwd_context.hash("pharma123"), "pharmacist"),
+        ("pharma5", "Pharmacist 05", pwd_context.hash("pharma123"), "pharmacist"),
+        ("pharma6", "Pharmacist 06", pwd_context.hash("pharma123"), "pharmacist"),
+    ]
+
+    # Insert without overwriting
+    for user in default_admins + default_pharmacists:
         try:
             cur.execute(
                 "INSERT INTO users (username, name, password_hash, role) VALUES (?, ?, ?, ?)",
-                (username, name, pw_hash, role)
+                (user[0], user[1], user[2], user[3])
             )
         except sqlite3.IntegrityError:
-            # user already exists
-            pass
+            pass  # already exists
 
     conn.commit()
     conn.close()
 
 
 def get_user(username):
-    """
-    Return user row as tuple: (username, name, password_hash, role) or None if not found.
-    """
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT username, name, password_hash, role FROM users WHERE username = ?", (username,))
     row = cur.fetchone()
     conn.close()
-    return row  # None or tuple
+    return row
 
 
-def update_password(username, new_plain_password):
-    """
-    Hashes the new password and updates the user's password_hash.
-    Returns True on success, False if user not found.
-    """
-    new_hash = pwd_context.hash(new_plain_password)
+def update_password(username, new_pass):
+    new_hash = pwd_context.hash(new_pass)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("UPDATE users SET password_hash = ? WHERE username = ?", (new_hash, username))
     conn.commit()
-    changed = cur.rowcount
+    ok = cur.rowcount
     conn.close()
-    return changed > 0
+    return ok > 0
 
 
-def verify_password(plain_password, stored_hash):
-    """
-    Verify plain password against stored hash. Returns True/False.
-    """
+def verify_password(plain, stored_hash):
     try:
-        return pwd_context.verify(plain_password, stored_hash)
+        return pwd_context.verify(plain, stored_hash)
     except Exception:
         return False
