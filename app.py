@@ -33,7 +33,7 @@ from user_database import init_user_db
 from password_reset import password_reset
 from styles import (
     apply_theme, apply_layout_styles,
-    apply_global_css, set_background, show_logo
+    apply_global_css, set_background, show_logo,restore_default_layout
 )
 
 # =====================================================
@@ -84,11 +84,10 @@ username = st.session_state["username"]
 role = st.session_state["role"]
 st.session_state["last_active"] = datetime.now().isoformat()
 
-# RESTORE NORMAL LAYOUT (MANDATORY)
-from styles import restore_default_layout
-restore_default_layout()  # <- EXACT PLACE
+# Restore Streamlit layout so sidebar + main UI works
+restore_default_layout()
 
-# Now apply theme AFTER layout is restored
+# Apply theme AFTER restoring layout
 apply_theme()
 apply_layout_styles()
 apply_global_css()
