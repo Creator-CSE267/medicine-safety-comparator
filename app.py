@@ -79,21 +79,23 @@ if not st.session_state["authenticated"]:
     login_router()
     st.stop()
 
-# SUCCESSFUL LOGIN
+# AFTER LOGIN SUCCESS
 username = st.session_state["username"]
 role = st.session_state["role"]
 st.session_state["last_active"] = datetime.now().isoformat()
 
+# RESTORE NORMAL LAYOUT (MANDATORY)
+from styles import restore_default_layout
+restore_default_layout()  # <- EXACT PLACE
 
-# =====================================================
-# APPLY THEME AFTER LOGIN ONLY
-# =====================================================
-
+# Now apply theme AFTER layout is restored
 apply_theme()
 apply_layout_styles()
 apply_global_css()
+
 set_background("bg1.jpg")
 show_logo("logo.png")
+
 
 st.title("💊 Medicine Safety Comparator")
 
