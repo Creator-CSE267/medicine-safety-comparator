@@ -59,7 +59,7 @@ def login_page() -> Tuple[str, str]:
                         st.session_state["logged_in"] = True
                         st.session_state["username"] = row[0]
                         st.session_state["role"] = row[3]
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("Invalid username or password.")
 
