@@ -13,5 +13,6 @@ pyzxing
 SQLAlchemy>=2.0.19
 passlib
 streamlit-cookies-manager
-pymongo
-dnspython
+pymongo>=4.4
+dnspython>=2.3
+certifi
