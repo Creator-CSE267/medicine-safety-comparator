@@ -1,4 +1,3 @@
-
 # app.py
 
 import streamlit as st
@@ -18,6 +17,9 @@ from sklearn.impute import SimpleImputer
 from datetime import datetime, timedelta
 from PIL import Image
 import io
+from pymongo import MongoClient
+from bson import ObjectId
+
 # ------------ Login system imports ------------
 from login import login_router
 from user_database import init_user_db
@@ -29,7 +31,35 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 # --------------- CONFIG ------------------------
 SESSION_TIMEOUT_SECONDS = 30 * 60
 
-# --------------- INIT DB -----------------------
+# --------------- MONGODB CONNECT ----------------
+@st.cache_resource
+def get_db():
+    # expects Streamlit Cloud Secrets:
+    # [MONGO]
+    # URI = "mongodb+srv://user:pass@cluster.../dbname"
+    # DBNAME = "medicine_db"
+    try:
+        uri = st.secrets["MONGO"]["URI"]
+        dbname = st.secrets["MONGO"]["DBNAME"]
+    except Exception:
+        # fallback to env vars if needed
+        import os as _os
+        uri = _os.getenv("MONGO_URI")
+        dbname = _os.getenv("MONGO_DBNAME")
+    if not uri or not dbname:
+        st.error("MongoDB secrets are not set. Add MONGO.URI and MONGO.DBNAME in Streamlit Secrets.")
+        st.stop()
+    client = MongoClient(uri)
+    return client[dbname]
+
+db = get_db()
+collection = db["inventory"]
+
+# Additional collections
+consumables_col = db["consumables"]
+logs_col = db["usage_log"]
+
+# ------------ INIT DB (users) -----------------------
 init_user_db()
 
 # --------------- SESSION DEFAULTS --------------
@@ -83,80 +113,146 @@ show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
 
-
-
-# --------------------
-# Sidebar with avatar + logout + role menu
-# --------------------
-def render_avatar(username, size=72):
-    """
-    Renders a circular avatar with initials if no image file exists.
-    If a file named avatars/{username}.png or .jpg exists it will be shown.
-    Otherwise initials circle is shown via HTML/CSS.
-    """
-    avatar_path_png = os.path.join("avatars", f"{username}.png")
-    avatar_path_jpg = os.path.join("avatars", f"{username}.jpg")
-    if os.path.exists(avatar_path_png):
-        st.sidebar.image(avatar_path_png, width=size)
-        return
-    if os.path.exists(avatar_path_jpg):
-        st.sidebar.image(avatar_path_jpg, width=size)
-        return
-
-    # initials fallback
-    initials = "".join([p[0] for p in username.split()][:2]).upper() if username else "U"
-    circle_html = f"""
-    <div style="
-        width:{size}px;height:{size}px;border-radius:50%;
-        background: linear-gradient(135deg,#2E86C1,#5DADE2);
-        display:flex;align-items:center;justify-content:center;
-        font-weight:700;color:white;font-size:{size//2}px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    ">{initials}</div>
-    """
-    st.sidebar.markdown(circle_html, unsafe_allow_html=True)
-
-with st.sidebar:
-    st.markdown("<h3 style='color:#2E86C1;margin-bottom:6px;'>MedSafe AI</h3>", unsafe_allow_html=True)
-    render_avatar(username, size=72)
-    st.sidebar.write(f"**{username}**")
-    st.sidebar.write(f"Role: **{role}**")
-    st.sidebar.markdown("---")
-
-    # Logout button (placed in the sidebar)
-    if st.sidebar.button("Logout 🔒"):
-        st.session_state["authenticated"] = False
-        st.session_state["username"] = None
-        st.session_state["role"] = None
-        st.session_state["last_active"] = None
-        st.success("Logged out. Redirecting to login...")
-        st.rerun()
-
-    # role-based menu
-    if role == "admin":
-        menu = st.sidebar.radio("📌 Navigation", ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
-    elif role == "pharmacist":
-        menu = st.sidebar.radio("📌 Navigation", ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
-    else:
-        menu = st.sidebar.radio("📌 Navigation", ["📦 Inventory"])
-
-    st.sidebar.markdown("---")
-    st.sidebar.write("© 2025 MedSafe AI")
-
-
-
-
 # ===============================
-# File Paths
+# File Paths (kept for compatibility but CSVs are not required now)
 # ===============================
 MEDICINE_FILE = "medicine_dataset.csv"
 INVENTORY_FILE = "inventory.csv"
-CONSUMABLES_FILE = "consumables_dataset.csv"   # ✅ missing before
-LOG_FILE = "usage_log.csv"
+CONSUMABLES_FILE = "consumables_dataset.csv"
+LOG_FILE = "usage_log.csv"  # legacy name (we now use logs_col)
 
 # ===============================
-# Load Medicine Dataset
+# DB helper functions (Inventory / Consumables / Logs)
 # ===============================
+def _ensure_columns(df, expected):
+    for c in expected:
+        if c not in df.columns:
+            df[c] = None
+    return df
+
+# --- Inventory helpers ---
+def load_medicines_df():
+    docs = list(collection.find({}))
+    if not docs:
+        cols = ["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"]
+        return pd.DataFrame(columns=cols)
+    for d in docs:
+        d["_id"] = str(d["_id"])
+    df = pd.DataFrame(docs)
+    expected = ["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"]
+    df = _ensure_columns(df, expected)
+    if "Expiry" in df.columns:
+        df["Expiry"] = pd.to_datetime(df["Expiry"], errors="coerce")
+    # normalize types
+    if "Stock" in df.columns:
+        df["Stock"] = pd.to_numeric(df["Stock"], errors="coerce").fillna(0).astype(int)
+    return df
+
+def save_medicine_to_db(doc):
+    # doc: dict with UPC, Ingredient, Manufacturer, Batch, Stock, Expiry (expiry may be date or iso str)
+    q = {"UPC": doc.get("UPC"), "Batch": doc.get("Batch")}
+    existing = collection.find_one(q)
+    # Normalize expiry
+    if "Expiry" in doc and pd.notnull(doc["Expiry"]):
+        try:
+            doc["Expiry"] = pd.to_datetime(doc["Expiry"]).isoformat()
+        except Exception:
+            doc["Expiry"] = str(doc["Expiry"])
+    if existing:
+        upd = {}
+        if "Stock" in doc:
+            try:
+                upd["Stock"] = int(existing.get("Stock", 0)) + int(doc.get("Stock", 0))
+            except:
+                upd["Stock"] = doc.get("Stock")
+        if "Expiry" in doc:
+            upd["Expiry"] = doc["Expiry"]
+        if upd:
+            collection.update_one({"_id": existing["_id"]}, {"$set": upd})
+        return str(existing["_id"])
+    else:
+        collection.insert_one(doc)
+        return None
+
+def delete_medicine_by_id(obj_id):
+    try:
+        collection.delete_one({"_id": ObjectId(obj_id)})
+    except Exception as e:
+        st.error(f"Delete failed: {e}")
+
+# --- Consumables helpers ---
+def load_consumables_df():
+    docs = list(consumables_col.find({}))
+    if not docs:
+        cols = [
+            "Item Name", "Category", "Material Type", "Sterility Level",
+            "Expiry Period (Months)", "Storage Temperature (C)", "Quantity in Stock",
+            "Usage Type", "Certification Standard", "UPC", "Safe/Not Safe"
+        ]
+        return pd.DataFrame(columns=cols)
+    for d in docs:
+        d["_id"] = str(d["_id"])
+    df = pd.DataFrame(docs)
+    # normalize numeric
+    if "Quantity in Stock" in df.columns:
+        df["Quantity in Stock"] = pd.to_numeric(df["Quantity in Stock"], errors="coerce").fillna(0).astype(int)
+    return df
+
+def save_consumable_to_db(doc):
+    # doc should include keys matching the consumables schema
+    q = {"UPC": doc.get("UPC")} if doc.get("UPC") else None
+    existing = consumables_col.find_one(q) if q else None
+    if existing:
+        upd = {}
+        if "Quantity in Stock" in doc:
+            try:
+                upd["Quantity in Stock"] = int(existing.get("Quantity in Stock", 0)) + int(doc.get("Quantity in Stock", 0))
+            except:
+                upd["Quantity in Stock"] = doc.get("Quantity in Stock")
+        if "Expiry Period (Months)" in doc:
+            upd["Expiry Period (Months)"] = doc.get("Expiry Period (Months)")
+        if upd:
+            consumables_col.update_one({"_id": existing["_id"]}, {"$set": upd})
+        return str(existing["_id"])
+    else:
+        consumables_col.insert_one(doc)
+        return None
+
+# --- Logs helpers ---
+def append_log(entry: dict):
+    # ensure timestamp stored as ISO string
+    if "timestamp" in entry:
+        try:
+            entry["timestamp"] = pd.to_datetime(entry["timestamp"]).isoformat()
+        except:
+            entry["timestamp"] = datetime.now().isoformat()
+    else:
+        entry["timestamp"] = datetime.now().isoformat()
+    logs_col.insert_one(entry)
+
+def load_logs_df(limit=5000):
+    docs = list(logs_col.find({}).sort([("_id", -1)]).limit(limit))
+    if not docs:
+        cols = ["timestamp", "UPC", "Ingredient", "Competitor", "Result"]
+        return pd.DataFrame(columns=cols)
+    for d in docs:
+        d["_id"] = str(d["_id"])
+        if "timestamp" in d:
+            d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce")
+    df = pd.DataFrame(docs)
+    return df
+
+def clear_logs_in_db():
+    logs_col.delete_many({})
+
+
+# ===============================
+# Load Medicine Dataset (local file for ML model)
+# ===============================
+if not os.path.exists(MEDICINE_FILE):
+    st.error(f"Required dataset '{MEDICINE_FILE}' not found in repository.")
+    st.stop()
+
 df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
 df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
 
@@ -255,6 +351,61 @@ def suggest_improvements(values):
     return suggestions
 
 # ===============================
+# Pages & Navigation
+# ===============================
+
+# --------------------
+# Sidebar with avatar + logout + role menu
+# --------------------
+def render_avatar(username, size=72):
+    avatar_path_png = os.path.join("avatars", f"{username}.png")
+    avatar_path_jpg = os.path.join("avatars", f"{username}.jpg")
+    if os.path.exists(avatar_path_png):
+        st.sidebar.image(avatar_path_png, width=size)
+        return
+    if os.path.exists(avatar_path_jpg):
+        st.sidebar.image(avatar_path_jpg, width=size)
+        return
+
+    initials = "".join([p[0] for p in username.split()][:2]).upper() if username else "U"
+    circle_html = f"""
+    <div style="
+        width:{size}px;height:{size}px;border-radius:50%;
+        background: linear-gradient(135deg,#2E86C1,#5DADE2);
+        display:flex;align-items:center;justify-content:center;
+        font-weight:700;color:white;font-size:{size//2}px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    ">{initials}</div>
+    """
+    st.sidebar.markdown(circle_html, unsafe_allow_html=True)
+
+with st.sidebar:
+    st.markdown("<h3 style='color:#2E86C1;margin-bottom:6px;'>MedSafe AI</h3>", unsafe_allow_html=True)
+    render_avatar(username, size=72)
+    st.sidebar.write(f"**{username}**")
+    st.sidebar.write(f"Role: **{role}**")
+    st.sidebar.markdown("---")
+
+    if st.sidebar.button("Logout 🔒"):
+        st.session_state["authenticated"] = False
+        st.session_state["username"] = None
+        st.session_state["role"] = None
+        st.session_state["last_active"] = None
+        st.success("Logged out. Redirecting to login...")
+        st.rerun()
+
+    if role == "admin":
+        menu = st.sidebar.radio("📌 Navigation", ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
+    elif role == "pharmacist":
+        menu = st.sidebar.radio("📌 Navigation", ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
+    else:
+        menu = st.sidebar.radio("📌 Navigation", ["📦 Inventory"])
+
+    st.sidebar.markdown("---")
+    st.sidebar.write("© 2025 MedSafe AI")
+
+
+# ===============================
 # Pages
 # ===============================
 
@@ -262,8 +413,6 @@ def suggest_improvements(values):
 if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
     st.subheader("🔍 Search by UPC or Active Ingredient")
-
-
 
     col1, col2 = st.columns(2)
     with col1:
@@ -342,25 +491,20 @@ if menu == "🧪 Testing":
                     for s in suggestions:
                         st.write(f"- {s}")
 
-            # Log
+            # Log (save to Mongo)
             log_entry = {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": datetime.now().isoformat(),
                 "UPC": upc_input,
                 "Ingredient": ingredient_input,
                 "Competitor": comp_name,
                 "Result": result
             }
-            log_df = pd.DataFrame([log_entry])
-            if not os.path.exists(LOG_FILE):
-                log_df.to_csv(LOG_FILE, index=False)
-            else:
-                log_df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+            append_log(log_entry)
 
             # --- PDF Report Download ---
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
             from reportlab.lib.styles import getSampleStyleSheet
             from reportlab.lib.pagesizes import A4
-            import io
 
             buffer = io.BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=A4)
@@ -429,86 +573,64 @@ if menu == "🧪 Testing":
 
 # --- 📊 Dashboard Page ---
 elif menu == "📊 Dashboard":
-    apply_global_css()   # ✅ apply styling
+    apply_global_css()
     st.markdown("<div class='main-title'>📊 Medicine Safety Analytics Dashboard</div>", unsafe_allow_html=True)
 
-    if os.path.exists(LOG_FILE):
-        try:
-            logs = pd.read_csv(LOG_FILE, on_bad_lines="skip")
-            logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
+    # Load logs from DB
+    logs = load_logs_df(limit=5000)
 
-            if not logs.empty:
-                # --- KPI Cards ---
-                total_tests = len(logs)
-                safe_count = logs["Result"].str.lower().eq("safe").sum()
-                unsafe_count = logs["Result"].str.lower().eq("not safe").sum()
-                most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns else "N/A"
+    if not logs.empty:
+        # KPI Cards
+        total_tests = len(logs)
+        safe_count = logs["Result"].str.lower().eq("safe").sum() if "Result" in logs.columns else 0
+        unsafe_count = logs["Result"].str.lower().eq("not safe").sum() if "Result" in logs.columns else 0
+        most_common_ing = logs["Ingredient"].mode()[0] if "Ingredient" in logs.columns and not logs["Ingredient"].mode().empty else "N/A"
 
-                st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("🧪 Total Tests", total_tests)
-                col2.metric("✅ Safe", safe_count)
-                col3.metric("⚠ Unsafe", unsafe_count)
-                col4.metric("🔥 Top Ingredient", most_common_ing)
+        st.markdown("<div class='section-header'>📌 Key Performance Indicators</div>", unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("🧪 Total Tests", total_tests)
+        col2.metric("✅ Safe", safe_count)
+        col3.metric("⚠ Unsafe", unsafe_count)
+        col4.metric("🔥 Top Ingredient", most_common_ing)
 
-                # --- Trend Over Time ---
-                st.markdown("<div class='section-header'>📈 Usage Trend Over Time</div>", unsafe_allow_html=True)
-                daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
-                fig_trend = px.line(
-                    daily_trend, x="timestamp", y="count",
-                    markers=True,
-                    title="Tests Conducted Per Day"
-                )
-                fig_trend.update_traces(line=dict(width=3, color="#2E86C1"))
-                fig_trend.update_layout(title_x=0.5)
-                st.plotly_chart(fig_trend, use_container_width=True)
+        # Trend Over Time
+        st.markdown("<div class='section-header'>📈 Usage Trend Over Time</div>", unsafe_allow_html=True)
+        daily_trend = logs.groupby(logs["timestamp"].dt.date).size().reset_index(name="count")
+        fig_trend = px.line(
+            daily_trend, x="timestamp", y="count",
+            markers=True,
+            title="Tests Conducted Per Day"
+        )
+        fig_trend.update_traces(line=dict(width=3, color="#2E86C1"))
+        fig_trend.update_layout(title_x=0.5)
+        st.plotly_chart(fig_trend, use_container_width=True)
 
-                # --- Recent Logs ---
-                st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
-                st.dataframe(
-                    logs.tail(10)[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]],
-                    use_container_width=True
-                )
+        # Recent Logs
+        st.markdown("<div class='section-header'>📋 Recent Activity</div>", unsafe_allow_html=True)
+        st.dataframe(
+            logs.head(10)[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]],
+            use_container_width=True
+        )
 
-                # --- Clear Logs Button ---
-                st.markdown("<div class='section-header'>🗑 Manage Logs</div>", unsafe_allow_html=True)
-                if st.button("🗑 Clear Logs"):
-                    os.remove(LOG_FILE)
-                    st.success("✅ Logs cleared successfully. Restart the app to see empty dashboard.")
-
-            else:
-                st.info("No data in logs yet. Run some comparisons first.")
-
-        except Exception as e:
-            st.error(f"⚠ Could not read logs: {e}")
-            st.info("Try clearing or deleting usage_log.csv if the issue persists.")
-
+        # Clear Logs Button
+        st.markdown("<div class='section-header'>🗑 Manage Logs</div>", unsafe_allow_html=True)
+        if st.button("🗑 Clear Logs"):
+            clear_logs_in_db()
+            st.success("✅ Logs cleared successfully.")
     else:
         st.info("No logs yet. Run some comparisons to see dashboard data.")
-
-
 
 
 # --- 📦 Inventory Page ---
 elif menu == "📦 Inventory":
     st.markdown("<div class='main-title'>📦 Unified Inventory Management</div>", unsafe_allow_html=True)
 
-    # Ensure both files exist
-    if not os.path.exists(INVENTORY_FILE):
-        pd.DataFrame(columns=["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"]).to_csv(INVENTORY_FILE, index=False)
-    if not os.path.exists(CONSUMABLES_FILE):
-        pd.DataFrame(columns=[
-            "Item Name", "Category", "Material Type", "Sterility Level",
-            "Expiry Period (Months)", "Storage Temperature (C)", "Quantity in Stock",
-            "Usage Type", "Certification Standard", "UPC", "Safe/Not Safe"
-        ]).to_csv(CONSUMABLES_FILE, index=False)
-
     try:
-        # Load datasets
-        medicines = pd.read_csv(INVENTORY_FILE)
-        consumables = pd.read_csv(CONSUMABLES_FILE)
+        # Load datasets from DB
+        medicines = load_medicines_df()
+        consumables = load_consumables_df()
 
-        # ✅ Normalize medicine column names
+        # Normalize medicine column names (keeps downstream code compatible)
         rename_map = {
             "Active Ingredient": "Ingredient",
             "Batch Number": "Batch",
@@ -517,7 +639,7 @@ elif menu == "📦 Inventory":
         }
         medicines = medicines.rename(columns={k: v for k, v in rename_map.items() if k in medicines.columns})
 
-        # ✅ Add Expiry if missing (using Days Until Expiry)
+        # Add Expiry if missing (using Days Until Expiry)
         if "Expiry" not in medicines.columns and "Days Until Expiry" in medicines.columns:
             today = pd.Timestamp.today()
             medicines["Expiry"] = today + pd.to_timedelta(medicines["Days Until Expiry"], unit="D")
@@ -530,7 +652,7 @@ elif menu == "📦 Inventory":
         with tab1:
             st.markdown("<div class='section-header'>💊 Medicines Inventory</div>", unsafe_allow_html=True)
 
-            # --- KPI Cards ---
+            # KPI Cards
             if not medicines.empty:
                 total_meds = medicines["Ingredient"].nunique()
                 total_stock = medicines["Stock"].sum()
@@ -544,7 +666,7 @@ elif menu == "📦 Inventory":
                 col2.metric("📦 Total Stock", total_stock)
                 col3.metric("⏳ Expiring Soon", expiring_count)
 
-            # --- Add Medicine ---
+            # Add Medicine (DB-backed)
             st.markdown("<div class='section-header'>➕ Add / Update Medicine</div>", unsafe_allow_html=True)
             with st.form("add_medicine_form", clear_on_submit=True):
                 col1, col2, col3 = st.columns(3)
@@ -562,27 +684,35 @@ elif menu == "📦 Inventory":
                 submitted = st.form_submit_button("💾 Save Medicine")
                 if submitted:
                     if med_name.strip():
-                        # Check if same UPC + Batch exists → update stock
-                        mask = (medicines["UPC"] == upc) & (medicines["Batch"] == batch)
-                        if medicines[mask].empty:
-                            new_entry = pd.DataFrame([[upc, med_name, manufacturer, batch, stock, expiry]],
-                                                     columns=["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"])
-                            medicines = pd.concat([medicines, new_entry], ignore_index=True)
-                        else:
-                            medicines.loc[mask, "Stock"] += stock
-                            medicines.loc[mask, "Expiry"] = expiry
-                        medicines.to_csv(INVENTORY_FILE, index=False)
+                        doc = {
+                            "UPC": upc,
+                            "Ingredient": med_name,
+                            "Manufacturer": manufacturer,
+                            "Batch": batch,
+                            "Stock": int(stock),
+                            "Expiry": expiry.isoformat()
+                        }
+                        save_medicine_to_db(doc)
                         st.success(f"✅ {med_name} saved successfully!")
+                        medicines = load_medicines_df()
                     else:
                         st.warning("⚠ Please enter a valid medicine name.")
 
-            # --- View Medicines ---
+            # View Medicines
             st.markdown("<div class='section-header'>📋 Current Medicines</div>", unsafe_allow_html=True)
             if not medicines.empty:
                 st.dataframe(medicines, use_container_width=True)
             else:
                 st.info("No medicines in inventory yet.")
- 
+
+            # Delete medicine UI
+            if not medicines.empty and "_id" in medicines.columns:
+                st.markdown("### Delete medicine record")
+                delete_id = st.selectbox("Select record to delete", medicines["_id"])
+                if st.button("Delete Medicine"):
+                    delete_medicine_by_id(delete_id)
+                    st.success("Record deleted.")
+                    medicines = load_medicines_df()
 
         # -------------------------
         # 🛠 Consumables Tab
@@ -590,7 +720,7 @@ elif menu == "📦 Inventory":
         with tab2:
             st.markdown("<div class='section-header'>🛠 Consumables Inventory</div>", unsafe_allow_html=True)
 
-            # --- KPI Cards ---
+            # KPI Cards
             if not consumables.empty:
                 total_items = consumables["Item Name"].nunique()
                 total_stock = consumables["Quantity in Stock"].sum()
@@ -604,7 +734,7 @@ elif menu == "📦 Inventory":
                 col2.metric("📦 Total Stock", total_stock)
                 col3.metric("⏳ Expiring Soon", expiring_count)
 
-            # --- Add Consumable ---
+            # Add Consumable (DB-backed)
             st.markdown("<div class='section-header'>➕ Add / Update Consumable</div>", unsafe_allow_html=True)
             with st.form("add_consumable_form", clear_on_submit=True):
                 col1, col2 = st.columns(2)
@@ -626,22 +756,26 @@ elif menu == "📦 Inventory":
                 submitted = st.form_submit_button("💾 Save Consumable")
                 if submitted:
                     if item_name.strip():
-                        mask = (consumables["UPC"] == upc)
-                        if consumables[mask].empty:
-                            new_entry = pd.DataFrame([[item_name, category, material, sterility,
-                                                       expiry_period, storage_temp, quantity,
-                                                       usage_type, cert, upc, safe_status]],
-                                                     columns=consumables.columns)
-                            consumables = pd.concat([consumables, new_entry], ignore_index=True)
-                        else:
-                            consumables.loc[mask, "Quantity in Stock"] += quantity
-                            consumables.loc[mask, "Expiry Period (Months)"] = expiry_period
-                        consumables.to_csv(CONSUMABLES_FILE, index=False)
+                        doc = {
+                            "Item Name": item_name,
+                            "Category": category,
+                            "Material Type": material,
+                            "Sterility Level": sterility,
+                            "Expiry Period (Months)": int(expiry_period),
+                            "Storage Temperature (C)": storage_temp,
+                            "Quantity in Stock": int(quantity),
+                            "Usage Type": usage_type,
+                            "Certification Standard": cert,
+                            "UPC": upc,
+                            "Safe/Not Safe": safe_status
+                        }
+                        save_consumable_to_db(doc)
                         st.success(f"✅ {item_name} saved successfully!")
+                        consumables = load_consumables_df()
                     else:
                         st.warning("⚠ Please enter a valid consumable name.")
 
-            # --- View Consumables ---
+            # View Consumables
             st.markdown("<div class='section-header'>📋 Current Consumables</div>", unsafe_allow_html=True)
             if not consumables.empty:
                 st.dataframe(consumables, use_container_width=True)
@@ -650,27 +784,13 @@ elif menu == "📦 Inventory":
 
     except Exception as e:
         st.error(f"⚠ Could not process inventory: {e}")
-        st.info("Try deleting or fixing the CSV files if the issue persists.")
+        st.info("Try fixing the database documents if the issue persists.")
+
 
 # ===============================
 # STEP 6 — PASSWORD RESET PAGE
 # ===============================
 
 if menu == "🔑 Change Password":
-    from password_reset import password_reset
     password_reset(username)
     st.stop()
-
-    new_pass = st.text_input("Enter New Password", type="password")
-    confirm_pass = st.text_input("Confirm New Password", type="password")
-
-    if st.button("Update Password"):
-        if not new_pass or not confirm_pass:
-            st.warning("Please fill all fields.")
-        elif new_pass != confirm_pass:
-            st.error("Passwords do not match!")
-        else:
-            update_password(username, new_pass)
-            st.success("✅ Password updated successfully! Please login again.")
-            st.info("Restart the app or refresh the page to continue.")
-
