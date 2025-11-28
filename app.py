@@ -19,6 +19,9 @@ from PIL import Image
 import io
 from pymongo import MongoClient
 from bson import ObjectId
+import os as _os
+import certifi
+from pymongo import MongoClient
 
 # ------------ Login system imports ------------
 from login import login_router
@@ -32,24 +35,41 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 SESSION_TIMEOUT_SECONDS = 30 * 60
 
 # --------------- MONGODB CONNECT ----------------
+
 @st.cache_resource
 def get_db():
-    # expects Streamlit Cloud Secrets:
-    # [MONGO]
-    # URI = "mongodb+srv://user:pass@cluster.../dbname"
-    # DBNAME = "medicine_db"
+    """
+    Robust MongoDB connect for Streamlit Cloud.
+    Uses certifi CA bundle for TLS verification (fixes SSL handshake errors).
+    """
+
+
+    # Load values from Streamlit Secrets
     try:
         uri = st.secrets["MONGO"]["URI"]
         dbname = st.secrets["MONGO"]["DBNAME"]
     except Exception:
-        # fallback to env vars if needed
-        import os as _os
         uri = _os.getenv("MONGO_URI")
         dbname = _os.getenv("MONGO_DBNAME")
+
     if not uri or not dbname:
-        st.error("MongoDB secrets are not set. Add MONGO.URI and MONGO.DBNAME in Streamlit Secrets.")
+        st.error("MongoDB configuration missing. Add MONGO.URI and MONGO.DBNAME to Streamlit secrets.")
         st.stop()
-    client = MongoClient(uri)
+
+    client_opts = {
+        "serverSelectionTimeoutMS": 20000,
+        "connectTimeoutMS": 20000,
+        "tls": True,
+        "tlsCAFile": certifi.where(),   # <- this is the main fix
+    }
+
+    try:
+        client = MongoClient(uri, **client_opts)
+        client.admin.command("ping")   # force handshake now (fail early)
+    except Exception as e:
+        st.error(f"Could not connect to MongoDB: {e}")
+        raise
+
     return client[dbname]
 
 db = get_db()
