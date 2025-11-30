@@ -736,288 +736,219 @@ elif menu == "📊 Dashboard":
 
 
 # --- 📦 Inventory Page ---
-# --- 📦 Inventory Page (MongoDB-backed, two collections) ---
+# --- 📦 Inventory Page (clean UI: hide _id but use it internally) ---
 elif menu == "📦 Inventory":
-    st.markdown("<div class='main-title'>📦 Unified Inventory Management (MongoDB)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='main-title'>📦 Inventory Management (MongoDB)</div>", unsafe_allow_html=True)
 
     try:
-        # Load from DB
-        medicines = load_medicines_df()
-        consumables = load_consumables_df()
-
-        # Normalize column names (backwards compatibility)
-        rename_map = {
-            "Active Ingredient": "Ingredient",
-            "Batch Number": "Batch",
-            "Quantity": "Stock",
-            "Days Until Expiry": "Days Until Expiry"
-        }
-        medicines = medicines.rename(columns={k: v for k, v in rename_map.items() if k in medicines.columns})
-
-        # If expiry missing but Days Until Expiry present, compute expiry
-        if "Expiry" not in medicines.columns and "Days Until Expiry" in medicines.columns:
-            today = pd.Timestamp.today()
-            medicines["Expiry"] = today + pd.to_timedelta(medicines["Days Until Expiry"].fillna(0).astype(int), unit="D")
+        # Load collections (each returns a DataFrame with _id as string)
+        medicines = load_medicines()  # expects _id column as string
+        consumables = load_consumables()
 
         tab1, tab2 = st.tabs(["💊 Medicines", "🛠 Consumables"])
 
         # -------------------------
-        # 💊 Medicines Tab
+        # 💊 Medicines Tab (clean)
         # -------------------------
         with tab1:
             st.markdown("<div class='section-header'>💊 Medicines Inventory</div>", unsafe_allow_html=True)
 
-            # --- Filters / Search / Controls ---
-            with st.expander("🔎 Search & Filters", expanded=False):
-                col_a, col_b, col_c = st.columns([2,2,1])
-                with col_a:
-                    search_upc = st.text_input("Search by UPC")
-                    search_name = st.text_input("Search by Ingredient")
-                with col_b:
-                    manufacturer_filter = st.text_input("Filter by Manufacturer")
-                with col_c:
-                    show_only_expiring = st.checkbox("Show expiring in 30 days", value=False)
-
-                # apply filters
-                meds_view = medicines.copy()
-                if search_upc:
-                    meds_view = meds_view[meds_view["UPC"].astype(str).str.contains(search_upc.strip(), case=False, na=False)]
-                if search_name:
-                    meds_view = meds_view[meds_view["Ingredient"].astype(str).str.contains(search_name.strip(), case=False, na=False)]
-                if manufacturer_filter:
-                    meds_view = meds_view[meds_view["Manufacturer"].astype(str).str.contains(manufacturer_filter.strip(), case=False, na=False)]
-                if show_only_expiring and "Expiry" in meds_view.columns:
-                    meds_view = meds_view[pd.to_datetime(meds_view["Expiry"], errors="coerce") <= pd.Timestamp.today() + pd.Timedelta(days=30)]
-
-            # --- KPI Row ---
-            if not medicines.empty:
+            # KPIs
+            if medicines is None or medicines.empty:
+                total_meds = 0
+                total_stock = 0
+            else:
                 total_meds = medicines["Ingredient"].nunique()
-                total_stock = medicines["Stock"].fillna(0).sum()
-                expiring_soon = medicines[
-                    pd.to_datetime(medicines["Expiry"], errors="coerce") <= pd.Timestamp.today() + pd.Timedelta(days=30)
-                ]
-                expiring_count = len(expiring_soon)
-            else:
-                total_meds = total_stock = expiring_count = 0
+                total_stock = medicines["Stock"].fillna(0).astype(int).sum()
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("💊 Unique Medicines", total_meds)
-            col2.metric("📦 Total Stock", int(total_stock))
-            col3.metric("⏳ Expiring Soon", int(expiring_count))
+            c1, c2 = st.columns(2)
+            c1.metric("💊 Unique Medicines", total_meds)
+            c2.metric("📦 Total Stock", int(total_stock))
 
-            # --- Add / Update Medicine ---
+            # --- Add / Update Medicine (form) ---
             st.markdown("<div class='section-header'>➕ Add / Update Medicine</div>", unsafe_allow_html=True)
-            with st.form("add_medicine_form", clear_on_submit=True):
-                rcol1, rcol2, rcol3 = st.columns(3)
-                with rcol1:
+            with st.form("med_form", clear_on_submit=False):
+                a1, a2, a3 = st.columns(3)
+                with a1:
                     upc = st.text_input("UPC")
-                    med_name = st.text_input("Ingredient")
-                with rcol2:
+                    ingredient = st.text_input("Ingredient")
+                with a2:
                     manufacturer = st.text_input("Manufacturer")
-                    batch = st.text_input("Batch Number")
-                with rcol3:
-                    stock = st.number_input("Stock Quantity", min_value=0, step=1, value=1)
-                    expiry = st.date_input("Expiry Date", value=pd.Timestamp.today())
+                    batch = st.text_input("Batch")
+                with a3:
+                    stock = st.number_input("Stock", min_value=0, value=1, step=1)
+                    expiry = st.date_input("Expiry Date")
 
-                submitted_med = st.form_submit_button("💾 Save Medicine")
-                if submitted_med:
-                    if not med_name.strip():
-                        st.warning("Please enter a valid medicine name.")
-                    else:
-                        doc = {
-                            "UPC": upc.strip() if upc else "",
-                            "Ingredient": med_name.strip(),
-                            "Manufacturer": manufacturer.strip(),
-                            "Batch": batch.strip(),
-                            "Stock": int(stock),
-                            "Expiry": expiry.isoformat() if expiry is not None else None
-                        }
-                        save_medicine_to_db(doc)
-                        st.success(f"✅ {med_name} saved successfully!")
-                        medicines = load_medicines_df()
-                        meds_view = medicines.copy()
+                save_med = st.form_submit_button("💾 Save Medicine")
+                if save_med:
+                    doc = {
+                        "UPC": upc.strip(),
+                        "Ingredient": ingredient.strip(),
+                        "Manufacturer": manufacturer.strip(),
+                        "Batch": batch.strip(),
+                        "Stock": int(stock),
+                        "Expiry": expiry.isoformat() if expiry else None
+                    }
+                    save_medicine(doc)
+                    st.success("Saved medicine to MongoDB")
+                    st.experimental_rerun()
 
-            # --- Data Table with Pagination & Inline actions ---
-            st.markdown("<div class='section-header'>📋 Current Medicines</div>", unsafe_allow_html=True)
-            if meds_view.empty:
-                st.info("No medicines found with current filters.")
+            st.markdown("<div class='section-header'>📋 Medicines List</div>", unsafe_allow_html=True)
+
+            # Prepare display dataframe (hide _id)
+            if medicines is None or medicines.empty:
+                st.info("No medicines found.")
             else:
-                # paging
-                page_size = st.selectbox("Rows per page", [10, 25, 50], index=0)
-                total = len(meds_view)
-                pages = (total - 1) // page_size + 1
-                page = st.number_input("Page", min_value=1, max_value=pages, value=1, step=1)
-                start = (page - 1) * page_size
-                end = start + page_size
-                page_df = meds_view.iloc[start:end].reset_index(drop=True)
+                display_meds = medicines.copy()
+                # Convert expiry to readable date
+                if "Expiry" in display_meds.columns:
+                    display_meds["Expiry"] = pd.to_datetime(display_meds["Expiry"], errors="coerce").dt.date
+                # Hide internal _id from display
+                display_meds = display_meds.drop(columns=["_id"], errors="ignore")
+                st.dataframe(display_meds, use_container_width=True)
 
-                # compute days_left if expiry present
-                if "Expiry" in page_df.columns:
-                    page_df["Expiry"] = pd.to_datetime(page_df["Expiry"], errors="coerce")
-                    page_df["Days Left"] = (page_df["Expiry"] - pd.Timestamp.now()).dt.days
+                # Build selection list for manage area (human readable labels -> map to _id)
+                labels = []
+                id_map = []
+                for _, row in medicines.iterrows():
+                    label = f"{row.get('Ingredient','(no name)')}  |  UPC:{row.get('UPC','')}  |  Batch:{row.get('Batch','')}"
+                    labels.append(label)
+                    id_map.append(row.get("_id"))
 
-                st.dataframe(page_df, use_container_width=True)
+                st.markdown("### Manage a medicine record")
+                sel_index = st.selectbox("Select medicine to edit/delete", options=list(range(len(labels))), format_func=lambda i: labels[i]) if labels else None
 
-                # Select a record for edit/delete
-                if "_id" in meds_view.columns:
-                    st.markdown("### Manage selected medicine")
-                    sel = st.selectbox("Select record by ID", meds_view["_id"].tolist())
-                    if sel:
-                        rec = medicines[medicines["_id"] == sel].iloc[0].to_dict()
-                        st.write("**Selected:**", rec.get("Ingredient", "N/A"))
-                        c1, c2, c3 = st.columns(3)
-                        with c1:
-                            new_name = st.text_input("Ingredient", value=rec.get("Ingredient", ""))
-                        with c2:
-                            new_man = st.text_input("Manufacturer", value=rec.get("Manufacturer", ""))
-                            new_batch = st.text_input("Batch", value=rec.get("Batch", ""))
-                        with c3:
-                            new_stock = st.number_input("Stock", min_value=0, value=int(rec.get("Stock", 0)))
-                            try:
-                                new_expiry = st.date_input("Expiry", value=pd.to_datetime(rec.get("Expiry")).date())
-                            except Exception:
-                                new_expiry = st.date_input("Expiry")
-                        if st.button("Save changes"):
-                            # Update the DB document
-                            update_fields = {
-                                "Ingredient": new_name.strip(),
-                                "Manufacturer": new_man.strip(),
-                                "Batch": new_batch.strip(),
-                                "Stock": int(new_stock),
-                                "Expiry": new_expiry.isoformat() if new_expiry else None
-                            }
-                            collection.update_one({"_id": ObjectId(sel)}, {"$set": update_fields})
-                            st.success("Updated record.")
-                            medicines = load_medicines_df()
-                            meds_view = medicines.copy()
-                        if st.button("Delete this record"):
-                            delete_medicine_by_id(sel)
-                            st.success("Record deleted.")
-                            medicines = load_medicines_df()
-                            meds_view = medicines.copy()
+                if sel_index is not None:
+                    selected_id = id_map[sel_index]
+                    rec = medicines[medicines["_id"] == selected_id].iloc[0].to_dict()
+
+                    m1, m2, m3 = st.columns(3)
+                    with m1:
+                        edit_ingredient = st.text_input("Ingredient", value=rec.get("Ingredient", ""))
+                        edit_upc = st.text_input("UPC", value=rec.get("UPC", ""))
+                    with m2:
+                        edit_manufacturer = st.text_input("Manufacturer", value=rec.get("Manufacturer", ""))
+                        edit_batch = st.text_input("Batch", value=rec.get("Batch", ""))
+                    with m3:
+                        edit_stock = st.number_input("Stock", min_value=0, value=int(rec.get("Stock", 0)))
+                        try:
+                            edit_expiry = st.date_input("Expiry", value=pd.to_datetime(rec.get("Expiry")).date())
+                        except Exception:
+                            edit_expiry = st.date_input("Expiry")
+
+                    if st.button("Save changes to selected"):
+                        update_fields = {
+                            "Ingredient": edit_ingredient.strip(),
+                            "UPC": edit_upc.strip(),
+                            "Manufacturer": edit_manufacturer.strip(),
+                            "Batch": edit_batch.strip(),
+                            "Stock": int(edit_stock),
+                            "Expiry": edit_expiry.isoformat() if edit_expiry else None
+                        }
+                        # update by ObjectId string
+                        collection.update_one({"_id": ObjectId(selected_id)}, {"$set": update_fields})
+                        st.success("Medicine record updated.")
+                        st.experimental_rerun()
+
+                    if st.button("Delete selected medicine"):
+                        delete_medicine(selected_id)
+                        st.success("Record deleted.")
+                        st.experimental_rerun()
 
         # -------------------------
-        # 🛠 Consumables Tab
+        # 🛠 Consumables Tab (clean)
         # -------------------------
         with tab2:
             st.markdown("<div class='section-header'>🛠 Consumables Inventory</div>", unsafe_allow_html=True)
 
-            # Search/filter for consumables
-            with st.expander("🔎 Consumables Filters", expanded=False):
-                c_search_name = st.text_input("Search item name (consumables)")
-                c_search_upc = st.text_input("Search UPC (consumables)")
-                consum_view = consumables.copy()
-                if c_search_name:
-                    consum_view = consum_view[consum_view["Item Name"].astype(str).str.contains(c_search_name.strip(), case=False, na=False)]
-                if c_search_upc:
-                    consum_view = consum_view[consum_view["UPC"].astype(str).str.contains(c_search_upc.strip(), case=False, na=False)]
-
             # KPIs
-            if not consumables.empty:
-                total_items = consumables["Item Name"].nunique()
-                total_stock_c = consumables["Quantity in Stock"].sum()
-                soon_exp = consumables[
-                    pd.to_numeric(consumables.get("Expiry Period (Months)", pd.Series([])), errors="coerce").fillna(0) <= 1
-                ]
-                soon_count = len(soon_exp)
+            if consumables is None or consumables.empty:
+                total_cons = 0
+                total_qty = 0
             else:
-                total_items = total_stock_c = soon_count = 0
+                total_cons = consumables["Item Name"].nunique() if "Item Name" in consumables.columns else len(consumables)
+                total_qty = consumables["Quantity in Stock"].fillna(0).astype(int).sum()
 
-            cc1, cc2, cc3 = st.columns(3)
-            cc1.metric("🛠 Unique Items", total_items)
-            cc2.metric("📦 Total Stock", int(total_stock_c))
-            cc3.metric("⏳ Expiring Soon (<=1 mo)", int(soon_count))
+            cc1, cc2 = st.columns(2)
+            cc1.metric("🛠 Unique Items", total_cons)
+            cc2.metric("📦 Total Quantity", int(total_qty))
 
             # Add / Update consumable
             st.markdown("<div class='section-header'>➕ Add / Update Consumable</div>", unsafe_allow_html=True)
-            with st.form("add_consumable_form", clear_on_submit=True):
-                colx1, colx2 = st.columns(2)
-                with colx1:
+            with st.form("cons_form", clear_on_submit=False):
+                x1, x2 = st.columns(2)
+                with x1:
                     item_name = st.text_input("Item Name")
                     category = st.text_input("Category")
-                    material = st.text_input("Material Type")
-                    sterility = st.text_input("Sterility Level")
-                with colx2:
-                    expiry_period = st.number_input("Expiry Period (Months)", min_value=0, step=1, value=12)
-                    storage_temp = st.number_input("Storage Temp (°C)", step=1, value=25)
-                    quantity = st.number_input("Quantity in Stock", min_value=0, step=1, value=1)
                     upc_c = st.text_input("UPC")
-                usage_type = st.text_input("Usage Type")
-                cert = st.text_input("Certification Standard")
-                safe_status = st.selectbox("Safe/Not Safe", ["Safe", "Not Safe"])
+                with x2:
+                    qty = st.number_input("Quantity in Stock", min_value=0, value=1, step=1)
+                    expiry_months = st.number_input("Expiry Period (Months)", min_value=0, value=12)
+                    storage_temp = st.number_input("Storage Temp (°C)", value=25)
 
-                submitted_consum = st.form_submit_button("💾 Save Consumable")
-                if submitted_consum:
-                    if not item_name.strip():
-                        st.warning("Please enter a valid consumable name.")
-                    else:
-                        doc = {
-                            "Item Name": item_name.strip(),
-                            "Category": category.strip(),
-                            "Material Type": material.strip(),
-                            "Sterility Level": sterility.strip(),
-                            "Expiry Period (Months)": int(expiry_period),
-                            "Storage Temperature (C)": storage_temp,
-                            "Quantity in Stock": int(quantity),
-                            "Usage Type": usage_type.strip(),
-                            "Certification Standard": cert.strip(),
-                            "UPC": upc_c.strip(),
-                            "Safe/Not Safe": safe_status
-                        }
-                        save_consumable_to_db(doc)
-                        st.success(f"✅ {item_name} saved successfully!")
-                        consumables = load_consumables_df()
-                        consum_view = consumables.copy()
+                submit_cons = st.form_submit_button("💾 Save Consumable")
+                if submit_cons:
+                    doc = {
+                        "Item Name": item_name.strip(),
+                        "Category": category.strip(),
+                        "UPC": upc_c.strip(),
+                        "Quantity in Stock": int(qty),
+                        "Expiry Period (Months)": int(expiry_months),
+                        "Storage Temperature (C)": storage_temp
+                    }
+                    save_consumable(doc)
+                    st.success("Saved consumable to MongoDB")
+                    st.experimental_rerun()
 
-            # Show consumables table with pagination
-            st.markdown("<div class='section-header'>📋 Current Consumables</div>", unsafe_allow_html=True)
-            if consum_view.empty:
+            st.markdown("<div class='section-header'>📋 Consumables List</div>", unsafe_allow_html=True)
+            if consumables is None or consumables.empty:
                 st.info("No consumables found.")
             else:
-                # paging for consumables
-                c_page_size = st.selectbox("Rows per page (consumables)", [10, 25, 50], index=0, key="cons_page_size")
-                c_total = len(consum_view)
-                c_pages = (c_total - 1) // c_page_size + 1
-                c_page = st.number_input("Page (consumables)", min_value=1, max_value=c_pages, value=1, key="cons_page")
-                c_start = (c_page - 1) * c_page_size
-                c_end = c_start + c_page_size
-                c_page_df = consum_view.iloc[c_start:c_end].reset_index(drop=True)
-                st.dataframe(c_page_df, use_container_width=True)
+                display_cons = consumables.copy()
+                display_cons = display_cons.drop(columns=["_id"], errors="ignore")
+                st.dataframe(display_cons, use_container_width=True)
 
-                # manage consumable record
-                if "_id" in consum_view.columns:
-                    st.markdown("### Manage selected consumable")
-                    selc = st.selectbox("Select consumable by ID", consum_view["_id"].tolist())
-                    if selc:
-                        crec = consumables[consumables["_id"] == selc].iloc[0].to_dict()
-                        st.write("**Selected:**", crec.get("Item Name", "N/A"))
-                        e1, e2 = st.columns(2)
-                        with e1:
-                            new_item = st.text_input("Item Name", value=crec.get("Item Name", ""))
-                            new_cat = st.text_input("Category", value=crec.get("Category", ""))
-                            new_qty = st.number_input("Quantity in Stock", min_value=0, value=int(crec.get("Quantity in Stock", 0)))
-                        with e2:
-                            new_upc = st.text_input("UPC", value=crec.get("UPC", ""))
-                            new_exp_m = st.number_input("Expiry Period (Months)", min_value=0, value=int(crec.get("Expiry Period (Months)", 0)))
-                            new_safe = st.selectbox("Safe/Not Safe", ["Safe", "Not Safe"], index=0 if crec.get("Safe/Not Safe","Safe")=="Safe" else 1)
+                # selection list for consumables
+                clabels = []
+                cid_map = []
+                for _, row in consumables.iterrows():
+                    label = f"{row.get('Item Name','(no name)')}  |  UPC:{row.get('UPC','')}  |  Qty:{int(row.get('Quantity in Stock',0))}"
+                    clabels.append(label)
+                    cid_map.append(row.get("_id"))
 
-                        if st.button("Save Consumable Changes"):
-                            consumables_col.update_one({"_id": ObjectId(selc)}, {"$set": {
-                                "Item Name": new_item.strip(),
-                                "Category": new_cat.strip(),
-                                "Quantity in Stock": int(new_qty),
-                                "UPC": new_upc.strip(),
-                                "Expiry Period (Months)": int(new_exp_m),
-                                "Safe/Not Safe": new_safe
-                            }})
-                            st.success("Consumable updated.")
-                            consumables = load_consumables_df()
-                            consum_view = consumables.copy()
-                        if st.button("Delete Consumable"):
-                            consumables_col.delete_one({"_id": ObjectId(selc)})
-                            st.success("Consumable deleted.")
-                            consumables = load_consumables_df()
-                            consum_view = consumables.copy()
+                st.markdown("### Manage a consumable")
+                csel_index = st.selectbox("Select consumable to edit/delete", options=list(range(len(clabels))), format_func=lambda i: clabels[i]) if clabels else None
+
+                if csel_index is not None:
+                    selected_cid = cid_map[csel_index]
+                    crec = consumables[consumables["_id"] == selected_cid].iloc[0].to_dict()
+
+                    e1, e2 = st.columns(2)
+                    with e1:
+                        new_item = st.text_input("Item Name", value=crec.get("Item Name", ""))
+                        new_cat = st.text_input("Category", value=crec.get("Category", ""))
+                        new_qty = st.number_input("Quantity in Stock", min_value=0, value=int(crec.get("Quantity in Stock", 0)))
+                    with e2:
+                        new_upc = st.text_input("UPC", value=crec.get("UPC", ""))
+                        new_exp_m = st.number_input("Expiry Period (Months)", min_value=0, value=int(crec.get("Expiry Period (Months)", 0)))
+                        new_safe = st.selectbox("Safe/Not Safe", ["Safe", "Not Safe"], index=0 if crec.get("Safe/Not Safe","Safe")=="Safe" else 1)
+
+                    if st.button("Save Consumable Changes"):
+                        consumables_col.update_one({"_id": ObjectId(selected_cid)}, {"$set": {
+                            "Item Name": new_item.strip(),
+                            "Category": new_cat.strip(),
+                            "Quantity in Stock": int(new_qty),
+                            "UPC": new_upc.strip(),
+                            "Expiry Period (Months)": int(new_exp_m),
+                            "Safe/Not Safe": new_safe
+                        }})
+                        st.success("Consumable updated.")
+                        st.experimental_rerun()
+
+                    if st.button("Delete Consumable"):
+                        delete_consumable(selected_cid)
+                        st.success("Consumable deleted.")
+                        st.experimental_rerun()
 
     except Exception as e:
         st.error(f"⚠ Could not process inventory: {e}")
