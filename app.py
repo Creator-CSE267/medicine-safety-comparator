@@ -22,6 +22,9 @@ from bson import ObjectId
 import os as _os
 import certifi
 from pymongo import MongoClient
+import pandas as pd
+import os
+from bson import ObjectId
 
 # ------------ Login system imports ------------
 from login import login_router
@@ -72,18 +75,32 @@ def get_db():
 
     return client[dbname]
 
-# -----------------------------------------------------------
-# ONE BUTTON TO MIGRATE ALL CSV FILES → MongoDB
-# -----------------------------------------------------------
+# ---------------------------
+# SAFE ONE-CLICK CSV → Mongo MIGRATION
+# Paste this anywhere after your get_db() function (but it's safe to paste below the db = get_db() lines too)
+# ---------------------------
 
-import pandas as pd
-from bson import ObjectId
-import os
+def migrate_csv_to_mongo_safe():
+    """
+    Robust migration that obtains DB/collections inside the function so it never
+    fails with NameError if called earlier in file execution.
+    """
+    # get DB & collections (works whether db globals exist or not)
+    try:
+        db_local = get_db()
+    except Exception:
+        # fallback: if get_db is not available, try to read globals
+        db_local = globals().get("db")
+        if db_local is None:
+            raise RuntimeError("Database not available (get_db failed and global db is not set).")
 
-def migrate_csv_to_mongo():
-    # ------------------- Medicines -------------------
-    if os.path.exists("inventory.csv"):
-        df = pd.read_csv("inventory.csv")
+    coll = db_local["inventory"]
+    cons_coll = db_local["consumables"]
+
+    # ---------- migrate inventory.csv ----------
+    inv_path = "inventory.csv"
+    if os.path.exists(inv_path):
+        df = pd.read_csv(inv_path)
         for _, r in df.iterrows():
             doc = {
                 "UPC": str(r.get("UPC", "")).strip(),
@@ -93,16 +110,22 @@ def migrate_csv_to_mongo():
                 "Stock": int(r.get("Stock", r.get("Quantity", 0)) or 0),
                 "Expiry": str(r.get("Expiry", "")) if pd.notnull(r.get("Expiry", None)) else None
             }
+            # upsert by UPC+Batch
             key = {"UPC": doc["UPC"], "Batch": doc["Batch"]}
-            existing = collection.find_one(key)
-            if existing:
-                collection.update_one({"_id": existing["_id"]}, {"$set": doc})
+            if doc["UPC"] == "" and doc["Batch"] == "":
+                # if both empty, insert as new doc (avoid overwriting)
+                coll.insert_one(doc)
             else:
-                collection.insert_one(doc)
+                existing = coll.find_one(key)
+                if existing:
+                    coll.update_one({"_id": existing["_id"]}, {"$set": doc})
+                else:
+                    coll.insert_one(doc)
 
-    # ------------------- Consumables -------------------
-    if os.path.exists("consumables_dataset.csv"):
-        dfc = pd.read_csv("consumables_dataset.csv")
+    # ---------- migrate consumables_dataset.csv ----------
+    cons_path = "consumables_dataset.csv"
+    if os.path.exists(cons_path):
+        dfc = pd.read_csv(cons_path)
         for _, r in dfc.iterrows():
             doc = {
                 "Item Name": str(r.get("Item Name", "")).strip(),
@@ -118,20 +141,29 @@ def migrate_csv_to_mongo():
                 "Safe/Not Safe": str(r.get("Safe/Not Safe", "Safe")).strip()
             }
             key = {"UPC": doc["UPC"]} if doc["UPC"] else None
-            existing = consumables_col.find_one(key) if key else None
-            if existing:
-                consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
+            if key:
+                existing = cons_coll.find_one(key)
             else:
-                consumables_col.insert_one(doc)
+                existing = None
+
+            if existing:
+                cons_coll.update_one({"_id": existing["_id"]}, {"$set": doc})
+            else:
+                cons_coll.insert_one(doc)
 
     return True
 
 
-# ---------------- BUTTON ----------------
-if st.sidebar.button("📤 MIGRATE ALL CSV → MONGO"):
+# BUTTON (paste this where you want the button — sidebar recommended)
+if st.sidebar.button("📤 MIGRATE ALL CSV → MONGO (safe)"):
     with st.spinner("Migrating CSV data to MongoDB..."):
-        migrate_csv_to_mongo()
-    st.success("✅ Migration complete! Refresh the app.")
+        try:
+            migrate_csv_to_mongo_safe()
+            st.success("✅ Migration complete! Refresh the app.")
+        except Exception as e:
+            st.error(f"Migration failed: {e}")
+            raise
+
 
 
 db = get_db()
