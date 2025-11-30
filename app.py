@@ -172,6 +172,104 @@ collection = db["inventory"]
 # Additional collections
 consumables_col = db["consumables"]
 logs_col = db["usage_log"]
+# -----------------------------
+# Minimal MongoDB helper functions (paste here)
+# These provide load/save/delete used by the clean Inventory UI.
+# -----------------------------
+def load_medicines():
+    """Return medicines as a DataFrame with _id as string (safe for display)."""
+    docs = list(collection.find({}))
+    if not docs:
+        return pd.DataFrame(columns=["UPC","Ingredient","Manufacturer","Batch","Stock","Expiry","_id"])
+    for d in docs:
+        d["_id"] = str(d["_id"])
+    df = pd.DataFrame(docs)
+    # normalize expected columns
+    for c in ["UPC","Ingredient","Manufacturer","Batch","Stock","Expiry","_id"]:
+        if c not in df.columns:
+            df[c] = None
+    # ensure numeric Stock
+    df["Stock"] = pd.to_numeric(df["Stock"], errors="coerce").fillna(0).astype(int)
+    return df
+
+def save_medicine(doc: dict):
+    """Insert or update a medicine by UPC+Batch."""
+    key = {"UPC": doc.get("UPC",""), "Batch": doc.get("Batch","")}
+    # if both key fields empty, insert new
+    if not key["UPC"] and not key["Batch"]:
+        collection.insert_one(doc)
+        return
+    existing = collection.find_one(key)
+    # normalize expiry
+    if "Expiry" in doc and doc["Expiry"] is not None:
+        try:
+            doc["Expiry"] = pd.to_datetime(doc["Expiry"]).isoformat()
+        except:
+            doc["Expiry"] = str(doc["Expiry"])
+    if existing:
+        collection.update_one({"_id": existing["_id"]}, {"$set": doc})
+    else:
+        collection.insert_one(doc)
+
+def delete_medicine(id_str: str):
+    """Delete medicine by ObjectId string."""
+    try:
+        collection.delete_one({"_id": ObjectId(id_str)})
+    except Exception as e:
+        raise
+
+def load_consumables():
+    """Return consumables as a DataFrame with _id as string."""
+    docs = list(consumables_col.find({}))
+    if not docs:
+        return pd.DataFrame(columns=[
+            "Item Name","Category","Material Type","Sterility Level",
+            "Expiry Period (Months)","Storage Temperature (C)","Quantity in Stock",
+            "Usage Type","Certification Standard","UPC","Safe/Not Safe","_id"
+        ])
+    for d in docs:
+        d["_id"] = str(d["_id"])
+    df = pd.DataFrame(docs)
+    # ensure numeric quantity
+    if "Quantity in Stock" in df.columns:
+        df["Quantity in Stock"] = pd.to_numeric(df["Quantity in Stock"], errors="coerce").fillna(0).astype(int)
+    return df
+
+def save_consumable(doc: dict):
+    """Insert or update consumable by UPC when provided, else insert."""
+    key = {"UPC": doc.get("UPC")} if doc.get("UPC") else None
+    existing = consumables_col.find_one(key) if key else None
+    if existing:
+        consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
+    else:
+        consumables_col.insert_one(doc)
+
+def delete_consumable(id_str: str):
+    """Delete consumable by ObjectId string."""
+    try:
+        consumables_col.delete_one({"_id": ObjectId(id_str)})
+    except Exception as e:
+        raise
+
+def log_test(entry: dict):
+    """Insert a test log entry."""
+    # ensure timestamp is iso
+    if "timestamp" in entry:
+        try:
+            entry["timestamp"] = pd.to_datetime(entry["timestamp"]).isoformat()
+        except:
+            entry["timestamp"] = datetime.now().isoformat()
+    else:
+        entry["timestamp"] = datetime.now().isoformat()
+    logs_col.insert_one(entry)
+
+def load_logs():
+    docs = list(logs_col.find({}).sort([("_id", -1)]).limit(5000))
+    for d in docs:
+        d["_id"] = str(d["_id"])
+        if "timestamp" in d:
+            d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce")
+    return pd.DataFrame(docs)
 
 # ------------ INIT DB (users) -----------------------
 init_user_db()
