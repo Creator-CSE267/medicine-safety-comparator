@@ -72,6 +72,68 @@ def get_db():
 
     return client[dbname]
 
+# -----------------------------------------------------------
+# ONE BUTTON TO MIGRATE ALL CSV FILES → MongoDB
+# -----------------------------------------------------------
+
+import pandas as pd
+from bson import ObjectId
+import os
+
+def migrate_csv_to_mongo():
+    # ------------------- Medicines -------------------
+    if os.path.exists("inventory.csv"):
+        df = pd.read_csv("inventory.csv")
+        for _, r in df.iterrows():
+            doc = {
+                "UPC": str(r.get("UPC", "")).strip(),
+                "Ingredient": str(r.get("Ingredient", r.get("Active Ingredient", ""))).strip(),
+                "Manufacturer": str(r.get("Manufacturer", "")).strip(),
+                "Batch": str(r.get("Batch", r.get("Batch Number", ""))).strip(),
+                "Stock": int(r.get("Stock", r.get("Quantity", 0)) or 0),
+                "Expiry": str(r.get("Expiry", "")) if pd.notnull(r.get("Expiry", None)) else None
+            }
+            key = {"UPC": doc["UPC"], "Batch": doc["Batch"]}
+            existing = collection.find_one(key)
+            if existing:
+                collection.update_one({"_id": existing["_id"]}, {"$set": doc})
+            else:
+                collection.insert_one(doc)
+
+    # ------------------- Consumables -------------------
+    if os.path.exists("consumables_dataset.csv"):
+        dfc = pd.read_csv("consumables_dataset.csv")
+        for _, r in dfc.iterrows():
+            doc = {
+                "Item Name": str(r.get("Item Name", "")).strip(),
+                "Category": str(r.get("Category", "")).strip(),
+                "Material Type": str(r.get("Material Type", "")).strip(),
+                "Sterility Level": str(r.get("Sterility Level", "")).strip(),
+                "Expiry Period (Months)": int(r.get("Expiry Period (Months)", 0) or 0),
+                "Storage Temperature (C)": r.get("Storage Temperature (C)", None),
+                "Quantity in Stock": int(r.get("Quantity in Stock", r.get("Quantity", 0)) or 0),
+                "Usage Type": str(r.get("Usage Type", "")).strip(),
+                "Certification Standard": str(r.get("Certification Standard", "")).strip(),
+                "UPC": str(r.get("UPC", "")).strip(),
+                "Safe/Not Safe": str(r.get("Safe/Not Safe", "Safe")).strip()
+            }
+            key = {"UPC": doc["UPC"]} if doc["UPC"] else None
+            existing = consumables_col.find_one(key) if key else None
+            if existing:
+                consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
+            else:
+                consumables_col.insert_one(doc)
+
+    return True
+
+
+# ---------------- BUTTON ----------------
+if st.sidebar.button("📤 MIGRATE ALL CSV → MONGO"):
+    with st.spinner("Migrating CSV data to MongoDB..."):
+        migrate_csv_to_mongo()
+    st.success("✅ Migration complete! Refresh the app.")
+
+
 db = get_db()
 collection = db["inventory"]
 
