@@ -60,6 +60,9 @@ cons_col = db["consumables"]
 log_col = db["usage_log"]
 med_col = db["medicines"]
 
+# alias for older code that uses `consumables_col`
+consumables_col = cons_col
+
 # --------------------------
 # Authentication
 # --------------------------
