@@ -104,7 +104,7 @@ st.set_page_config(page_title="MedSafe AI", page_icon="💊", layout="wide")
 apply_theme()
 apply_layout_styles()
 apply_global_css()
-set_background("bg4.jpg")
+set_background("bg5.png")
 show_logo("logo.png")
 
 username = st.session_state["username"]
