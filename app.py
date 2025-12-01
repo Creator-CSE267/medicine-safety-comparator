@@ -560,8 +560,10 @@ if menu == "🧪 Testing":
         comp_vals[c] = st.number_input(f"{c}", value=0.0, format="%.2f")
 
     # -------------------------
-    # Helper: build competitor DataFrame for model
     # -------------------------
+# Helper: build competitor DataFrame for model
+# (keep this defined inside the Testing page)
+# -------------------------
 def build_comp_df(active_ing, disease, numeric_dict):
     rec = {"Active Ingredient": active_ing or "Unknown", "Disease/Use Case": disease or "Unknown"}
     for cc in num_cols:
@@ -572,13 +574,15 @@ def build_comp_df(active_ing, disease, numeric_dict):
     return pd.DataFrame([rec])
 
 # -------------------------
-# Compare button handler — MUST be at top-level inside Testing page (not inside any function)
+# Compare button: run rule-based comparator, show suggestions, chart, logging, PDF
+# (This must be INSIDE the Testing page block)
 # -------------------------
 if st.button("🔎 Compare"):
-    # basic validation
+    # validate input
     if selected is None and (not ingr_input or ingr_input.strip() == ""):
         st.error("⚠️ Please enter a valid UPC or Active Ingredient first.")
     else:
+        # Use ingredient text (user provided or selected)
         active_ing = ingr_input if ingr_input else (selected.get("Active Ingredient") if selected is not None else "Unknown")
         disease = selected.get("Disease/Use Case", "Unknown") if selected is not None else "Unknown"
 
@@ -596,7 +600,7 @@ if st.button("🔎 Compare"):
         except Exception:
             std_row = global_std
 
-        # Option A: use rule-based strict comparator (recommended)
+        # Run the strict rule-based comparator (your deterministic rules)
         rule_out = predict_rule_based(active_ing, competitor_dict, std_row=std_row)
         result = rule_out["result"]
         details = rule_out["details"]
@@ -610,17 +614,19 @@ if st.button("🔎 Compare"):
 
         st.markdown("### 🔎 Per-criterion details")
         for d in details:
+            # color-coded lines
             if "PASS" in d:
                 st.markdown(f"<div style='color:green'>{d}</div>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
 
-        # Generate suggestions and display them
-        suggestions_list = suggestions(competitor_dict)
+        # Generate suggestions from rule-based check (based on competitor values)
+        suggestions_list = suggestions(competitor_dict)  # ensure this is defined BEFORE using
         if suggestions_list:
+            # show suggestions in black color (user request)
             st.subheader("🔧 Suggested Improvements")
             for s in suggestions_list:
-                st.write(f"- {s}")
+                st.markdown(f"<div style='color:#111111'>{s}</div>", unsafe_allow_html=True)
 
         # Chart compare standard vs competitor
         fig, ax = plt.subplots(figsize=(10, 4))
@@ -635,14 +641,16 @@ if st.button("🔎 Compare"):
         ax.legend()
         st.pyplot(fig)
 
-        # Logging (Mongo then CSV fallback)
+        # Log result (try Mongo first, else CSV)
         log_doc = {
             "timestamp": datetime.now().isoformat(),
             "UPC": upc_input,
             "Ingredient": active_ing,
             "Competitor": comp_name,
             "Result": result,
-            "confidence": confidence
+            "confidence": confidence,
+            "details": details,
+            "suggestions": suggestions_list
         }
         logged = False
         try:
@@ -659,7 +667,7 @@ if st.button("🔎 Compare"):
             except Exception:
                 st.error("Failed to log result.")
 
-        # PDF generation (keeps your existing code, includes suggestions)
+        # Build PDF (include suggestions_list)
         try:
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
             from reportlab.lib.styles import getSampleStyleSheet
@@ -736,6 +744,7 @@ if st.button("🔎 Compare"):
             )
         except Exception as e:
             st.warning("Failed to generate PDF report: " + str(e))
+
 
 
 
