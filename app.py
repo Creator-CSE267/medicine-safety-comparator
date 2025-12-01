@@ -1282,83 +1282,96 @@ def apply_consumable_filters(df):
     # ===========================
     # TAB 2 → CONSUMABLES
     # ===========================
-    with tab2:
-        st.subheader("🛠 Consumables Inventory")
+# ===========================
+# TAB 2 → CONSUMABLES
+# ===========================
+with tab2:
+    st.subheader("🛠 Consumables Inventory")
 
-        total_items = len(cons)
-        total_qty = cons["Quantity in Stock"].fillna(0).astype(int).sum() if not cons.empty else 0
-        c1, c2 = st.columns(2)
-        c1.metric("Total Consumables", total_items)
-        c2.metric("Total Quantity", int(total_qty))
+    total_items = len(cons)
+    total_qty = cons["Quantity in Stock"].fillna(0).astype(int).sum() if not cons.empty else 0
+    c1, c2 = st.columns(2)
+    c1.metric("Total Consumables", total_items)
+    c2.metric("Total Quantity", int(total_qty))
 
-        st.markdown("### ➕ Add / Update Consumable")
-        with st.form("add_cons"):
-            colA, colB = st.columns(2)
-            name = colA.text_input("Item Name")
-            category = colA.text_input("Category")
-            upc = colB.text_input("UPC")
-            qty = colB.number_input("Quantity", min_value=0, value=1)
-            expiry_m = colA.number_input("Expiry (Months)", min_value=0, value=12)
-            storage = colB.number_input("Storage Temp (°C)", value=25)
-            safe_flag = colA.selectbox("Safe / Not Safe", ["Safe", "Not Safe"])
-            if st.form_submit_button("Save Consumable"):
-                doc = {
-                    "Item Name": name.strip(),
-                    "Category": category.strip(),
-                    "UPC": upc.strip(),
-                    "Quantity in Stock": int(qty),
-                    "Expiry Period (Months)": int(expiry_m),
-                    "Storage Temperature (C)": storage,
-                    "Safe/Not Safe": safe_flag
-                }
-                existing = consumables_col.find_one({"UPC": doc["UPC"]}) if doc["UPC"] else None
-                if existing:
-                    consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
-                else:
-                    consumables_col.insert_one(doc)
-                st.success("Consumable saved.")
-                st.rerun()
+    st.markdown("### ➕ Add / Update Consumable")
+    with st.form("add_cons"):
+        colA, colB = st.columns(2)
+        name = colA.text_input("Item Name")
+        category = colA.text_input("Category")
+        upc = colB.text_input("UPC")
+        qty = colB.number_input("Quantity", min_value=0, value=1)
+        expiry_m = colA.number_input("Expiry (Months)", min_value=0, value=12)
+        storage = colB.number_input("Storage Temp (°C)", value=25)
+        safe_flag = colA.selectbox("Safe / Not Safe", ["Safe", "Not Safe"])
+        if st.form_submit_button("Save Consumable"):
+            doc = {
+                "Item Name": name.strip(),
+                "Category": category.strip(),
+                "UPC": upc.strip(),
+                "Quantity in Stock": int(qty),
+                "Expiry Period (Months)": int(expiry_m),
+                "Storage Temperature (C)": storage,
+                "Safe/Not Safe": safe_flag
+            }
+            existing = consumables_col.find_one({"UPC": doc["UPC"]}) if doc["UPC"] else None
+            if existing:
+                consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
+            else:
+                consumables_col.insert_one(doc)
+            st.success("Consumable saved.")
+            st.rerun()
 
-        st.markdown("### 📋 Consumables List (use Filters to narrow results)")
-        cons_filtered = apply_consumable_filters(cons) if not cons.empty else cons
+    st.markdown("### 📋 Consumables List (use Filters to narrow results)")
+    cons_filtered = apply_consumable_filters(cons) if not cons.empty else cons
 
-        if cons_filtered.empty:
-            st.info("No consumables found for the selected filters.")
-        else:
-            show2 = cons_filtered.copy().drop(columns=["_id"], errors="ignore")
-            st.dataframe(show2, use_container_width=True)
+    if cons_filtered.empty:
+        st.info("No consumables found for the selected filters.")
+    else:
+        show2 = cons_filtered.copy().drop(columns=["_id"], errors="ignore")
+        st.dataframe(show2, use_container_width=True)
 
-            labels = [f"{r.get('Item Name','(no name)')} | UPC:{r.get('UPC','')} | Qty:{int(r.get('Quantity in Stock') or 0)}" for _, r in cons_filtered.iterrows()]
-            idx_list = list(cons_filtered.index)
-            sel_idx = st.selectbox("Select consumable", options=list(range(len(labels))), format_func=lambda i: labels[i])
-            real_idx = idx_list[sel_idx]
-            rec = cons_filtered.loc[real_idx]
-            sel_id = rec["_id"]
+        labels = [
+            f"{r.get('Item Name','(no name)')} | UPC:{r.get('UPC','')} | Qty:{int(r.get('Quantity in Stock') or 0)}"
+            for _, r in cons_filtered.iterrows()
+        ]
+        idx_list = list(cons_filtered.index)
+        sel_idx = st.selectbox("Select consumable", options=list(range(len(labels))), format_func=lambda i: labels[i])
+        real_idx = idx_list[sel_idx]
+        rec = cons_filtered.loc[real_idx]
+        sel_id = rec["_id"]
 
-            col1, col2 = st.columns(2)
-            new_item = col1.text_input("Item Name", rec.get("Item Name", ""))
-            new_cat = col1.text_input("Category", rec.get("Category", ""))
-            new_upc = col2.text_input("UPC", rec.get("UPC", ""))
-            new_qty = col2.number_input("Quantity", min_value=0, value=int(rec.get("Quantity in Stock") or 0))
-            new_exp = col1.number_input("Expiry (Months)", min_value=0, value=int(rec.get("Expiry Period (Months)") or 0))
-            new_safe = col2.selectbox("Safe / Not Safe", ["Safe", "Not Safe"], index=0 if rec.get("Safe/Not Safe","Safe")=="Safe" else 1)
+        col1, col2 = st.columns(2)
+        new_item = col1.text_input("Item Name", rec.get("Item Name", ""))
+        new_cat = col1.text_input("Category", rec.get("Category", ""))
+        new_upc = col2.text_input("UPC", rec.get("UPC", ""))
+        new_qty = col2.number_input("Quantity", min_value=0, value=int(rec.get("Quantity in Stock") or 0))
+        new_exp = col1.number_input("Expiry (Months)", min_value=0, value=int(rec.get("Expiry Period (Months)") or 0))
+        new_safe = col2.selectbox(
+            "Safe / Not Safe",
+            ["Safe", "Not Safe"],
+            index=0 if rec.get("Safe/Not Safe", "Safe") == "Safe" else 1
+        )
 
-            if st.button("Save Consumable Changes"):
-                consumables_col.update_one({"_id": ObjectId(sel_id)}, {"$set": {
+        if st.button("Save Consumable Changes"):
+            consumables_col.update_one(
+                {"_id": ObjectId(sel_id)},
+                {"$set": {
                     "Item Name": new_item.strip(),
                     "Category": new_cat.strip(),
                     "UPC": new_upc.strip(),
                     "Quantity in Stock": int(new_qty),
                     "Expiry Period (Months)": int(new_exp),
                     "Safe/Not Safe": new_safe
-                }})
-                st.success("Updated.")
-                st.rerun()
+                }}
+            )
+            st.success("Updated.")
+            st.rerun()
 
-            if st.button("Delete Consumable"):
-                consumables_col.delete_one({"_id": ObjectId(sel_id)})
-                st.success("Deleted.")
-                st.rerun()
+        if st.button("Delete Consumable"):
+            consumables_col.delete_one({"_id": ObjectId(sel_id)})
+            st.success("Deleted.")
+            st.rerun()
 
 
 # =========================================================
