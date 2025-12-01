@@ -244,10 +244,9 @@ def suggestions(vals):
 # -------------------- SIDEBAR ROLE MENU --------------------
 with st.sidebar:
     st.markdown("<h3 style='color:#2E86C1;margin-bottom:6px;'>MedSafe AI</h3>", unsafe_allow_html=True)
-    render_avatar(username, size=72)
-
-    st.sidebar.write(f"**{username}**")
-    st.sidebar.write(f"Role: **{role}**")
+    render_avatar(st.session_state.get("username", "User"), size=72)
+    st.sidebar.write(f"**{st.session_state.get('username','User')}**")
+    st.sidebar.write(f"Role: **{st.session_state.get('role','guest')}**")
     st.sidebar.markdown("---")
 
     # Logout button
