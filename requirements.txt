@@ -16,3 +16,4 @@ streamlit-cookies-manager
 pymongo>=4.4
 dnspython>=2.3
 certifi
+joblib
