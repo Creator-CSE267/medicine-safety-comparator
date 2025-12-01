@@ -1178,35 +1178,37 @@ elif menu == "📦 Inventory":
         c1, c2 = st.columns(2)
         c1.metric("Total Medicines", total_items)
         c2.metric("Total Stock", int(total_stock))
+                # -------------------------------------------
+        # EXPIRY-BASED KPIs
         # -------------------------------------------
-# EXPIRY-BASED KPIs
-# -------------------------------------------
-today = datetime.today().date()
+        from datetime import timedelta
 
-# Convert expiry to date
-meds_exp = meds.copy()
-meds_exp["Expiry"] = pd.to_datetime(meds_exp["Expiry"], errors="coerce").dt.date
+        today = datetime.today().date()
 
-# 1. Expired medicines
-expired_df = meds_exp[meds_exp["Expiry"] < today]
-expired_count = len(expired_df)
+        meds_exp = meds.copy()
+        meds_exp["Expiry"] = pd.to_datetime(meds_exp["Expiry"], errors="coerce").dt.date
 
-# 2. Expiring soon (next 30 days)
-soon_df = meds_exp[
-    (meds_exp["Expiry"] >= today) &
-    (meds_exp["Expiry"] <= today + timedelta(days=30))
-]
-soon_count = len(soon_df)
+        # 1. Expired
+        expired_df = meds_exp[meds_exp["Expiry"] < today]
+        expired_count = len(expired_df)
 
-# 3. Nearest upcoming expiry
-next_exp_date = meds_exp[meds_exp["Expiry"] >= today]["Expiry"].min()
-next_exp_display = next_exp_date.strftime("%Y-%m-%d") if pd.notna(next_exp_date) else "No upcoming"
+        # 2. Expiring Soon (Next 30 Days)
+        soon_df = meds_exp[
+            (meds_exp["Expiry"] >= today) &
+            (meds_exp["Expiry"] <= today + timedelta(days=30))
+        ]
+        soon_count = len(soon_df)
 
-# KPI Row for Expiry
-ex1, ex2, ex3 = st.columns(3)
-ex1.metric("❌ Expired", expired_count)
-ex2.metric("⚠️ Expiring Soon (30 days)", soon_count)
-ex3.metric("📅 Next Expiry", next_exp_display)
+        # 3. Next Expiry
+        next_exp_date = meds_exp[meds_exp["Expiry"] >= today]["Expiry"].min()
+        next_exp_display = (
+            next_exp_date.strftime("%Y-%m-%d") if pd.notna(next_exp_date) else "No upcoming"
+        )
+
+        ex1, ex2, ex3 = st.columns(3)
+        ex1.metric("❌ Expired", expired_count)
+        ex2.metric("⚠️ Expiring Soon (30 days)", soon_count)
+        ex3.metric("📅 Next Expiry", next_exp_display)
 
 
         # Add / Update form (Medicines)
