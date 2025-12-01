@@ -191,7 +191,6 @@ if len(np.unique(y)) < 2:
 # Train ML Model (use per-ingredient standard deltas + persist)
 # --------------------------
 
-
 MODEL_DIR = pathlib.Path("models")
 MODEL_DIR.mkdir(exist_ok=True)
 MODEL_PATH = MODEL_DIR / "std_delta_pipeline.joblib"
@@ -199,12 +198,13 @@ LABEL_PATH = MODEL_DIR / "std_label_encoder.joblib"
 
 # compute per-ingredient standard medians (used for delta features)
 std_stats = df.groupby("Active Ingredient")[num_cols].median()
+global_std = std_stats.median() if not std_stats.empty else df[num_cols].median()
 
 # build augmented dataset that includes deltas to standard
 def build_augmented_df(raw_df):
     aug = raw_df.copy().reset_index(drop=True)
     aug = aug.merge(std_stats, how="left", left_on="Active Ingredient", right_index=True, suffixes=("", "_std"))
-    global_meds = std_stats.median().to_dict()
+    global_meds = std_stats.median().to_dict() if not std_stats.empty else df[num_cols].median().to_dict()
     for c in num_cols:
         std_col = c + "_std"
         if std_col not in aug.columns:
@@ -310,7 +310,7 @@ except Exception:
 
 
 # --------------------------
-# Safety Rules
+# Safety Rules (including Assay optimal zone)
 # --------------------------
 SAFETY = {
     "Days Until Expiry": {"min": 30},
@@ -318,25 +318,135 @@ SAFETY = {
     "Dissolution Rate (%)": {"min": 80},
     "Disintegration Time (minutes)": {"max": 30},
     "Impurity Level (%)": {"max": 2},
-    "Assay Purity (%)": {"min": 90},
+    # Set both min and max for Assay Purity - replace 90/105 with pharmacopeial min/max if you know them
+    "Assay Purity (%)": {"min": 90, "max": 105},
     "Warning Labels Present": {"min": 1},
 }
 
+# convenience sets to decide direction
+HIGHER_BETTER = {"Days Until Expiry", "Dissolution Rate (%)", "Warning Labels Present"}
+LOWER_BETTER = {"Disintegration Time (minutes)", "Impurity Level (%)"}
+# Assay Purity is handled as an optimal zone
+
 def suggestions(vals):
+    """
+    Generate human-friendly suggestions using SAFETY rules.
+    vals is a dict of numeric values (competitor values).
+    """
     out = []
     for col, val in vals.items():
+        try:
+            val_f = float(val)
+        except Exception:
+            continue
         rule = SAFETY.get(col)
         if not rule:
             continue
-        if "min" in rule and val < rule["min"]:
-            out.append(f"Increase *{col}* (min {rule['min']}).")
-        if "max" in rule and val > rule["max"]:
-            out.append(f"Reduce *{col}* (max {rule['max']}).")
+        # explicit min/max
+        if "min" in rule and val_f < rule["min"]:
+            out.append(f"Increase **{col}** to at least {rule['min']}. (Current: {val_f})")
+        if "max" in rule and val_f > rule["max"]:
+            out.append(f"Reduce **{col}** to at most {rule['max']}. (Current: {val_f})")
         if "range" in rule:
             lo, hi = rule["range"]
-            if not (lo <= val <= hi):
-                out.append(f"Keep *{col}* within {lo}-{hi}.")
+            if not (lo <= val_f <= hi):
+                out.append(f"Keep **{col}** within {lo}–{hi}. (Current: {val_f})")
+
+        # special case messaging for Assay Purity
+        if col == "Assay Purity (%)":
+            if "min" in rule and "max" in rule:
+                if val_f < rule["min"]:
+                    out.append(f"Assay Purity is low — review API content or manufacturing process to reach at least {rule['min']}%.")
+                elif val_f > rule["max"]:
+                    out.append(f"Assay Purity is above the acceptable upper limit — check for over-concentration or analytical error; target {rule['min']}–{rule['max']}%.")
+
     return out
+def predict_rule_based(active_ingredient, competitor_values, std_row=None):
+    """
+    Compare competitor_values against standard (std_row) and SAFETY rules.
+    Strict: result = "Safe" if fail_count == 0 else "Not Safe".
+    Returns dict with details, pass/fail counts, and result.
+    """
+    # standard medians for ingredient
+    if std_row is None:
+        try:
+            std_row = std_stats.loc[active_ingredient]
+        except Exception:
+            std_row = global_std
+
+    pass_count = 0
+    fail_count = 0
+    details = []
+
+    for col in num_cols:
+        std_val = float(std_row.get(col, 0.0)) if hasattr(std_row, "get") else float(std_row[col])
+        comp_val = float(competitor_values.get(col, 0.0))
+
+        # Assay Purity optimal-zone handling
+        if col == "Assay Purity (%)":
+            rule = SAFETY.get(col, {})
+            min_allowed = rule.get("min", None)
+            max_allowed = rule.get("max", None)
+            if min_allowed is not None and max_allowed is not None:
+                if min_allowed <= comp_val <= max_allowed:
+                    pass_count += 1
+                    details.append(f"{col}: {comp_val} within acceptable range {min_allowed}-{max_allowed} → PASS")
+                else:
+                    fail_count += 1
+                    details.append(f"{col}: {comp_val} outside acceptable range {min_allowed}-{max_allowed} → FAIL")
+            else:
+                # fallback: allow up to +5% above standard median (conservative)
+                fallback_max = min(std_val * 1.05, 110.0)
+                fallback_min = rule.get("min", std_val * 0.99)
+                if fallback_min <= comp_val <= fallback_max:
+                    pass_count += 1
+                    details.append(f"{col}: {comp_val} within fallback range {fallback_min:.2f}-{fallback_max:.2f} → PASS")
+                else:
+                    fail_count += 1
+                    details.append(f"{col}: {comp_val} outside fallback range {fallback_min:.2f}-{fallback_max:.2f} → FAIL")
+            continue
+
+        # normal rules
+        if col in HIGHER_BETTER:
+            if comp_val >= std_val:
+                pass_count += 1
+                details.append(f"{col}: {comp_val} ≥ {std_val} → PASS")
+            else:
+                fail_count += 1
+                details.append(f"{col}: {comp_val} < {std_val} → FAIL")
+            continue
+
+        if col in LOWER_BETTER:
+            if comp_val <= std_val:
+                pass_count += 1
+                details.append(f"{col}: {comp_val} ≤ {std_val} → PASS")
+            else:
+                fail_count += 1
+                details.append(f"{col}: {comp_val} > {std_val} → FAIL")
+            continue
+
+        # default: higher is better
+        if comp_val >= std_val:
+            pass_count += 1
+            details.append(f"{col}: {comp_val} ≥ {std_val} → PASS")
+        else:
+            fail_count += 1
+            details.append(f"{col}: {comp_val} < {std_val} → FAIL")
+
+    total = pass_count + fail_count if (pass_count + fail_count) > 0 else 1
+    confidence = pass_count / total
+
+    result = "Safe" if (fail_count == 0 and pass_count > 0) else "Not Safe"
+
+    return {
+        "result": result,
+        "confidence": confidence,
+        "pass_count": pass_count,
+        "fail_count": fail_count,
+        "details": details,
+        "std_values": (std_row.to_dict() if hasattr(std_row, "to_dict") else dict(std_row))
+    }
+
 
 # --------------------------
 # Sidebar Navigation
@@ -460,35 +570,59 @@ if menu == "🧪 Testing":
                 rec[cc] = 0.0
         return pd.DataFrame([rec])
 
-    if st.button("🔎 Compare"):
+          # inside your if st.button("🔎 Compare"):
         if selected is None and (not ingr_input or ingr_input.strip() == ""):
             st.error("⚠️ Please enter a valid UPC or Active Ingredient first.")
         else:
-            # Use ingredient text (user provided or selected)
             active_ing = ingr_input if ingr_input else (selected.get("Active Ingredient") if selected is not None else "Unknown")
             disease = selected.get("Disease/Use Case", "Unknown") if selected is not None else "Unknown"
 
-            competitor_df = build_comp_df(active_ing, disease, comp_vals)
+            # Build competitor dict from comp_vals (user inputs)
+            competitor_dict = {}
+            for c in num_cols:
+                try:
+                    competitor_dict[c] = float(comp_vals.get(c, 0.0))
+                except Exception:
+                    competitor_dict[c] = 0.0
 
-            # Model prediction (wrap in try/except)
+            # Get std_row for this active ingredient (fallback to global)
             try:
-                pred = model.predict(competitor_df)[0]
-                result = le.inverse_transform([pred])[0] if 'le' in globals() else str(pred)
-            except Exception as e:
-                st.error("Prediction failed: " + str(e))
-                result = "ERROR"
+                std_row = std_stats.loc[active_ing]
+            except Exception:
+                std_row = global_std
 
-            # Show result
-            if result == "ERROR":
-                st.error("Prediction failed; check model logs.")
+            # Run the strict rule-based comparator
+            rule_out = predict_rule_based(active_ing, competitor_dict, std_row=std_row)
+            result = rule_out["result"]
+            details = rule_out["details"]
+            confidence = rule_out["confidence"]
+
+            # Display result + details
+            if result.lower() == "safe":
+                st.success(f"✅ Prediction → {result} (confidence {confidence:.2f})")
             else:
-                st.success(f"Prediction → **{result}**")
+                st.error(f"❌ Prediction → {result} (confidence {confidence:.2f})")
 
-            # Chart: compare standard (if available) vs competitor
+            st.markdown("### 🔎 Per-criterion details")
+            for d in details:
+                # color-coded lines
+                if "PASS" in d:
+                    st.markdown(f"<div style='color:green'>{d}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
+
+            # Generate suggestions from rule-based check (based on competitor values)
+            suggestions_list = suggestions(competitor_dict)
+            if suggestions_list:
+                st.subheader("🔧 Suggested Improvements")
+                for s in suggestions_list:
+                    st.write(f"- {s}")
+
+            # Chart compare standard vs competitor
             fig, ax = plt.subplots(figsize=(10, 4))
             x = np.arange(len(num_cols))
-            std_vals = [float(selected.get(c, 0.0) or 0.0) for c in num_cols] if selected is not None else [0.0]*len(num_cols)
-            comp_vals_list = [float(comp_vals[c] or 0.0) for c in num_cols]
+            std_vals = [float(std_row.get(c, 0.0) or 0.0) for c in num_cols]
+            comp_vals_list = [competitor_dict[c] for c in num_cols]
 
             ax.bar(x - 0.3, std_vals, width=0.3, label="Standard")
             ax.bar(x + 0.3, comp_vals_list, width=0.3, label="Competitor")
@@ -497,53 +631,22 @@ if menu == "🧪 Testing":
             ax.legend()
             st.pyplot(fig)
 
-            # Suggestions: run your safety-rule suggestions against user-entered competitor values
-            suggestions_list = []
-            if isinstance(result, str) and result.lower() == "not safe":
-                st.error("❌ Competitor medicine is NOT SAFE.")
-                # call existing suggestions(...) function (uses SAFETY rules)
-                try:
-                    suggestions_list = suggestions(comp_vals)
-                except Exception:
-                    # fallback to the alternative name if you used suggest_improvements earlier
-                    try:
-                        suggestions_list = suggest_improvements(comp_vals)
-                    except Exception:
-                        suggestions_list = []
-
-                if suggestions_list:
-                    st.subheader("🔧 Suggested Improvements")
-                    for s in suggestions_list:
-                        st.write(f"- {s}")
-                else:
-                    st.info("No suggestions generated — check safety rules or input values.")
-            else:
-                # Optionally show rule-based tips even for safe results — comment/uncomment as desired
-                # tips = suggestions(comp_vals)
-                # if tips:
-                #     st.subheader("⚠️ Minor suggestions (optional):")
-                #     for t in tips:
-                #         st.write(f"- {t}")
-                pass
-
-            # -------------------------
-            # Logging: try Mongo then CSV fallback
-            # -------------------------
+            # Log result (try Mongo first, else CSV)
             log_doc = {
                 "timestamp": datetime.now().isoformat(),
                 "UPC": upc_input,
                 "Ingredient": active_ing,
                 "Competitor": comp_name,
-                "Result": result
+                "Result": result,
+                "confidence": confidence
             }
             logged = False
-            if 'log_col' in globals() and log_col is not None:
-                try:
-                    log_col.insert_one(log_doc)
-                    logged = True
-                    st.info("Logged result to MongoDB.")
-                except Exception:
-                    st.warning("MongoDB logging failed — falling back to CSV.")
+            try:
+                log_col.insert_one(log_doc)
+                logged = True
+                st.info("Logged result to MongoDB.")
+            except Exception:
+                st.warning("MongoDB logging failed — falling back to CSV.")
             if not logged:
                 try:
                     lf = "test_logs.csv"
@@ -552,9 +655,7 @@ if menu == "🧪 Testing":
                 except Exception:
                     st.error("Failed to log result.")
 
-            # -------------------------
-            # PDF Report Generation & Download (includes suggestions if Not Safe)
-            # -------------------------
+            # Build PDF (include suggestions_list)
             try:
                 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
                 from reportlab.lib.styles import getSampleStyleSheet
@@ -567,7 +668,6 @@ if menu == "🧪 Testing":
                 styles = getSampleStyleSheet()
                 elements = []
 
-                # logo
                 if os.path.exists("logo.png"):
                     try:
                         elements.append(RLImage("logo.png", width=100, height=100))
@@ -575,19 +675,16 @@ if menu == "🧪 Testing":
                     except Exception:
                         pass
 
-                # title/date
                 elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
                 elements.append(Spacer(1, 12))
                 elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
-                # standard
                 elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
                 elements.append(Paragraph(f"UPC: {selected['UPC'] if selected is not None else 'N/A'}", styles["Normal"]))
                 elements.append(Paragraph(f"Ingredient: {active_ing}", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
-                # competitor info
                 elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
                 elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
                 elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
@@ -595,27 +692,22 @@ if menu == "🧪 Testing":
                 elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
-                # prediction
                 elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-                if isinstance(result, str) and result.lower() == "safe":
+                if result.lower() == "safe":
                     elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
                 else:
                     elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
-                # suggestions
-                if isinstance(result, str) and result.lower() == "not safe" and suggestions_list:
+                if suggestions_list:
                     elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
                     for s in suggestions_list:
                         elements.append(Paragraph(f"- {s}", styles["Normal"]))
                     elements.append(Spacer(1, 12))
 
-                # criteria comparison table (text) — list numeric values
                 elements.append(Paragraph("<b>Criteria Comparison (Standard vs Competitor)</b>", styles["Heading2"]))
                 for idx, c in enumerate(num_cols):
-                    stdv = std_vals[idx] if selected is not None else "N/A"
-                    compv = comp_vals_list[idx]
-                    elements.append(Paragraph(f"{c}: Standard = {stdv}  |  Competitor = {compv}", styles["Normal"]))
+                    elements.append(Paragraph(f"{c}: Standard = {std_vals[idx]}  |  Competitor = {comp_vals_list[idx]}", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
                 # attach chart
@@ -629,7 +721,6 @@ if menu == "🧪 Testing":
                 except Exception:
                     pass
 
-                # build & provide download
                 doc.build(elements)
                 buffer.seek(0)
 
@@ -641,7 +732,6 @@ if menu == "🧪 Testing":
                 )
             except Exception as e:
                 st.warning("Failed to generate PDF report: " + str(e))
-
 
 
 # =========================================================
