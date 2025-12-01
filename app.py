@@ -74,6 +74,175 @@ def get_db():
         raise
 
     return client[dbname]
+# ------------------------------
+# One-click migration: medicine_dataset.csv -> medicines collection
+# ------------------------------
+def migrate_medicines_csv(dry_run: bool = False):
+    """
+    Migrate medicine_dataset.csv into MongoDB collection 'medicines'.
+    - dry_run=True will only compute actions and return a preview without writing.
+    - Upsert key: UPC + Batch (if present). If UPC empty, will upsert by UPC='' + Batch.
+    """
+    med_coll = db["medicines"]
+
+    csv_path = MEDICINE_FILE  # ensure MEDICINE_FILE is defined already
+    if not os.path.exists(csv_path):
+        return {"error": f"CSV file not found: {csv_path}"}
+
+    df = pd.read_csv(csv_path, dtype=str).fillna("")  # read everything as string to avoid dtype surprises
+
+    # normalize common column names
+    # attempt to support variants like 'Active Ingredient' vs 'Ingredient'
+    def get_col(df, possible):
+        for c in possible:
+            if c in df.columns:
+                return c
+        return None
+
+    col_map = {
+        "UPC": get_col(df, ["UPC", "Upc", "upc"]),
+        "Active Ingredient": get_col(df, ["Active Ingredient", "Ingredient", "active_ingredient"]),
+        "Disease/Use Case": get_col(df, ["Disease/Use Case", "Disease", "Use Case", "Indication"]),
+        "Days Until Expiry": get_col(df, ["Days Until Expiry", "Days_Until_Expiry", "Days Until Exp"]),
+        "Storage Temperature (C)": get_col(df, ["Storage Temperature (C)", "Storage Temp (C)", "Storage Temperature"]),
+        "Dissolution Rate (%)": get_col(df, ["Dissolution Rate (%)", "Dissolution Rate", "Dissolution_Rate"]),
+        "Disintegration Time (minutes)": get_col(df, ["Disintegration Time (minutes)", "Disintegration Time", "Disintegration_Time"]),
+        "Impurity Level (%)": get_col(df, ["Impurity Level (%)", "Impurity Level", "Impurity_Level"]),
+        "Assay Purity (%)": get_col(df, ["Assay Purity (%)", "Assay Purity", "Assay_Purity"]),
+        "Warning Labels Present": get_col(df, ["Warning Labels Present", "Warning Labels", "Warning_Labels"]),
+        "Safe/Not Safe": get_col(df, ["Safe/Not Safe", "Safe_Not_Safe", "Safe/NotSafe"]),
+        "Manufacturer": get_col(df, ["Manufacturer", "Mfg", "Maker"]),
+        "Batch": get_col(df, ["Batch", "Batch Number", "Batch_Number"]),
+        "Stock": get_col(df, ["Stock", "Quantity", "Qty"]),
+        "Expiry": get_col(df, ["Expiry", "Expiry Date", "Expiration Date", "Expiration"])
+    }
+
+    # Build canonical DataFrame
+    rows = []
+    for idx, r in df.iterrows():
+        doc = {}
+        for canon, col in col_map.items():
+            if col:
+                val = str(r.get(col, "")).strip()
+            else:
+                val = ""
+            # convert numeric-looking strings to numeric where appropriate (but keep as strings for Mongo)
+            doc[canon] = val if val != "" else None
+        # try to coerce some numeric fields to numbers (optional)
+        def to_int_or_none(x):
+            try:
+                if x is None or x == "":
+                    return None
+                return int(float(x))
+            except:
+                return None
+        def to_float_or_none(x):
+            try:
+                if x is None or x == "":
+                    return None
+                return float(x)
+            except:
+                return None
+
+        # numeric conversions (if present)
+        if doc["Days Until Expiry"] is not None:
+            doc["Days Until Expiry"] = to_int_or_none(doc["Days Until Expiry"])
+        if doc["Stock"] is not None:
+            doc["Stock"] = to_int_or_none(doc["Stock"])
+        if doc["Storage Temperature (C)"] is not None:
+            doc["Storage Temperature (C)"] = to_float_or_none(doc["Storage Temperature (C)"])
+        if doc["Dissolution Rate (%)"] is not None:
+            doc["Dissolution Rate (%)"] = to_float_or_none(doc["Dissolution Rate (%)"])
+        if doc["Disintegration Time (minutes)"] is not None:
+            doc["Disintegration Time (minutes)"] = to_float_or_none(doc["Disintegration Time (minutes)"])
+        if doc["Impurity Level (%)"] is not None:
+            doc["Impurity Level (%)"] = to_float_or_none(doc["Impurity Level (%)"])
+        if doc["Assay Purity (%)"] is not None:
+            doc["Assay Purity (%)"] = to_float_or_none(doc["Assay Purity (%)"])
+        if doc["Warning Labels Present"] is not None:
+            # accept "Yes"/"No" or 1/0
+            w = str(doc["Warning Labels Present"]).strip().lower()
+            if w in ("yes", "y", "true", "1"):
+                doc["Warning Labels Present"] = 1
+            elif w in ("no", "n", "false", "0"):
+                doc["Warning Labels Present"] = 0
+            else:
+                doc["Warning Labels Present"] = to_int_or_none(w)
+
+        rows.append(doc)
+
+    # Perform upserts
+    inserted = 0
+    updated = 0
+    skipped = 0
+    actions = []  # collect small preview for the UI
+    for doc in rows:
+        # define key for upsert: UPC + Batch (both may be None)
+        upc_key = doc.get("UPC") or ""
+        batch_key = doc.get("Batch") or ""
+        query = {"UPC": upc_key, "Batch": batch_key}
+
+        # Remove None values so we don't overwrite with null unintentionally
+        write_doc = {k: v for k, v in doc.items() if v is not None}
+
+        if dry_run:
+            existing = med_coll.find_one(query)
+            if existing:
+                actions.append({"action": "update", "key": query, "would_set": write_doc})
+                updated += 1
+            else:
+                actions.append({"action": "insert", "key": query, "would_set": write_doc})
+                inserted += 1
+            continue
+
+        # Actual write
+        if upc_key == "" and batch_key == "":
+            # both empty, insert as fresh doc to avoid accidental overwrite
+            med_coll.insert_one(write_doc)
+            inserted += 1
+            actions.append({"action": "insert", "key": "(no UPC+Batch)", "doc": write_doc})
+        else:
+            existing = med_coll.find_one(query)
+            if existing:
+                med_coll.update_one({"_id": existing["_id"]}, {"$set": write_doc})
+                updated += 1
+                actions.append({"action": "update", "key": query})
+            else:
+                med_coll.insert_one(write_doc)
+                inserted += 1
+                actions.append({"action": "insert", "key": query})
+
+    summary = {"inserted": inserted, "updated": updated, "skipped": skipped, "total_rows": len(rows)}
+    return {"summary": summary, "actions_preview": actions[:50]}  # return first 50 actions preview
+
+# ------------------------------
+# Streamlit UI block: preview & migrate
+# (Place this where you want user to run migration, e.g. in sidebar or admin area)
+# ------------------------------
+with st.sidebar.expander("Admin: Migrate medicines CSV → Mongo", expanded=False):
+    st.write("Migrate `medicine_dataset.csv` into MongoDB `medicines` collection (upsert by UPC+Batch).")
+    dry = st.checkbox("Dry run (preview only)", value=True)
+    if st.button("Preview migration"):
+        with st.spinner("Preparing preview..."):
+            res = migrate_medicines_csv(dry_run=True)
+            if "error" in res:
+                st.error(res["error"])
+            else:
+                s = res["summary"]
+                st.success(f"Preview: {s['total_rows']} rows → {s['inserted']} inserts, {s['updated']} updates (dry run).")
+                st.write("Sample actions (first 50):")
+                st.json(res["actions_preview"])
+    st.markdown("---")
+    if st.button("🚀 Run migration now"):
+        # If user forgot to preview, still allow run; we run for real here
+        with st.spinner("Migrating CSV -> MongoDB..."):
+            res = migrate_medicines_csv(dry_run=False)
+            if "error" in res:
+                st.error(res["error"])
+            else:
+                s = res["summary"]
+                st.success(f"Migration complete: {s['total_rows']} rows processed — {s['inserted']} inserted, {s['updated']} updated.")
+                st.info("Tip: Check the 'medicines' collection in MongoDB Atlas to verify documents.")
 
 # ---------------------------
 # SAFE ONE-CLICK CSV → Mongo MIGRATION
