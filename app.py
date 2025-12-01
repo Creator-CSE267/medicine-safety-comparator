@@ -158,7 +158,7 @@ if len(np.unique(y)) < 2:
     y = le.fit_transform(df["Safe/Not Safe"])
 
 model = None
-[PASTE BEGINS — PART 2]
+
 
 # --------------------------
 # Train ML Model
