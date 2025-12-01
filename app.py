@@ -1,12 +1,24 @@
-# app.py
+# app.py (CLEANED)
+"""
+MongoDB-only cleaned version of your app.py.
+Removes all CSV references and migration helpers.
+Keeps your login, user DB, password reset, and styles hooks intact.
+
+Replace your current app.py with this file. Make a backup first.
+"""
+
+import os
+import io
+from datetime import datetime
+from typing import Optional
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import os
 import plotly.express as px
-import plotly.graph_objects as go
+
+# ML
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -14,267 +26,76 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from datetime import datetime, timedelta
-from PIL import Image
-import io
-from pymongo import MongoClient
-from bson import ObjectId
-import os as _os
+
+# Mongo
 import certifi
 from pymongo import MongoClient
-import pandas as pd
-import os
 from bson import ObjectId
 
-# ------------ Login system imports ------------
+# Report
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+
+# App modules (keep these files in your repo)
 from login import login_router
 from user_database import init_user_db
 from password_reset import password_reset
 
-# ------------ Styling helpers -----------------
+# Styling helpers (keep these files in repo)
 from styles import apply_theme, apply_layout_styles, apply_global_css, set_background, show_logo
 
-# --------------- CONFIG ------------------------
+# ----------------------- CONFIG -----------------------
 SESSION_TIMEOUT_SECONDS = 30 * 60
 
-# --------------- MONGODB CONNECT ----------------
-
+# ----------------------- MONGO CONNECT -----------------------
 @st.cache_resource
 def get_db():
     """
-    Robust MongoDB connect for Streamlit Cloud.
-    Uses certifi CA bundle for TLS verification (fixes SSL handshake errors).
+    Connect to MongoDB Atlas using certifi CA bundle for TLS verification.
+    Expects Streamlit Secrets:
+      [MONGO]
+      URI = "<mongodb+srv://...>"
+      DBNAME = "your_db_name"
     """
-
-
-    # Load values from Streamlit Secrets
     try:
         uri = st.secrets["MONGO"]["URI"]
         dbname = st.secrets["MONGO"]["DBNAME"]
     except Exception:
-        uri = _os.getenv("MONGO_URI")
-        dbname = _os.getenv("MONGO_DBNAME")
+        uri = os.getenv("MONGO_URI")
+        dbname = os.getenv("MONGO_DBNAME")
 
     if not uri or not dbname:
-        st.error("MongoDB configuration missing. Add MONGO.URI and MONGO.DBNAME to Streamlit secrets.")
+        st.error("MongoDB secrets missing. Add MONGO.URI and MONGO.DBNAME to Streamlit secrets.")
         st.stop()
 
     client_opts = {
         "serverSelectionTimeoutMS": 20000,
         "connectTimeoutMS": 20000,
         "tls": True,
-        "tlsCAFile": certifi.where(),   # <- this is the main fix
+        "tlsCAFile": certifi.where(),
     }
 
+    client = MongoClient(uri, **client_opts)
     try:
-        client = MongoClient(uri, **client_opts)
-        client.admin.command("ping")   # force handshake now (fail early)
+        client.admin.command("ping")
     except Exception as e:
         st.error(f"Could not connect to MongoDB: {e}")
         raise
-
     return client[dbname]
 
-# ---------------------------
-# SAFE ONE-CLICK CSV → Mongo MIGRATION
-# Paste this anywhere after your get_db() function (but it's safe to paste below the db = get_db() lines too)
-# ---------------------------
-
-def migrate_csv_to_mongo_safe():
-    """
-    Robust migration that obtains DB/collections inside the function so it never
-    fails with NameError if called earlier in file execution.
-    """
-    # get DB & collections (works whether db globals exist or not)
-    try:
-        db_local = get_db()
-    except Exception:
-        # fallback: if get_db is not available, try to read globals
-        db_local = globals().get("db")
-        if db_local is None:
-            raise RuntimeError("Database not available (get_db failed and global db is not set).")
-
-    coll = db_local["inventory"]
-    cons_coll = db_local["consumables"]
-
-    # ---------- migrate inventory.csv ----------
-    inv_path = "inventory.csv"
-    if os.path.exists(inv_path):
-        df = pd.read_csv(inv_path)
-        for _, r in df.iterrows():
-            doc = {
-                "UPC": str(r.get("UPC", "")).strip(),
-                "Ingredient": str(r.get("Ingredient", r.get("Active Ingredient", ""))).strip(),
-                "Manufacturer": str(r.get("Manufacturer", "")).strip(),
-                "Batch": str(r.get("Batch", r.get("Batch Number", ""))).strip(),
-                "Stock": int(r.get("Stock", r.get("Quantity", 0)) or 0),
-                "Expiry": str(r.get("Expiry", "")) if pd.notnull(r.get("Expiry", None)) else None
-            }
-            # upsert by UPC+Batch
-            key = {"UPC": doc["UPC"], "Batch": doc["Batch"]}
-            if doc["UPC"] == "" and doc["Batch"] == "":
-                # if both empty, insert as new doc (avoid overwriting)
-                coll.insert_one(doc)
-            else:
-                existing = coll.find_one(key)
-                if existing:
-                    coll.update_one({"_id": existing["_id"]}, {"$set": doc})
-                else:
-                    coll.insert_one(doc)
-
-    # ---------- migrate consumables_dataset.csv ----------
-    cons_path = "consumables_dataset.csv"
-    if os.path.exists(cons_path):
-        dfc = pd.read_csv(cons_path)
-        for _, r in dfc.iterrows():
-            doc = {
-                "Item Name": str(r.get("Item Name", "")).strip(),
-                "Category": str(r.get("Category", "")).strip(),
-                "Material Type": str(r.get("Material Type", "")).strip(),
-                "Sterility Level": str(r.get("Sterility Level", "")).strip(),
-                "Expiry Period (Months)": int(r.get("Expiry Period (Months)", 0) or 0),
-                "Storage Temperature (C)": r.get("Storage Temperature (C)", None),
-                "Quantity in Stock": int(r.get("Quantity in Stock", r.get("Quantity", 0)) or 0),
-                "Usage Type": str(r.get("Usage Type", "")).strip(),
-                "Certification Standard": str(r.get("Certification Standard", "")).strip(),
-                "UPC": str(r.get("UPC", "")).strip(),
-                "Safe/Not Safe": str(r.get("Safe/Not Safe", "Safe")).strip()
-            }
-            key = {"UPC": doc["UPC"]} if doc["UPC"] else None
-            if key:
-                existing = cons_coll.find_one(key)
-            else:
-                existing = None
-
-            if existing:
-                cons_coll.update_one({"_id": existing["_id"]}, {"$set": doc})
-            else:
-                cons_coll.insert_one(doc)
-
-    return True
-
-
-# BUTTON (paste this where you want the button — sidebar recommended)
-if st.sidebar.button("📤 MIGRATE ALL CSV → MONGO (safe)"):
-    with st.spinner("Migrating CSV data to MongoDB..."):
-        try:
-            migrate_csv_to_mongo_safe()
-            st.success("✅ Migration complete! Refresh the app.")
-        except Exception as e:
-            st.error(f"Migration failed: {e}")
-            raise
-
-
-
+# initialize DB & collections
 db = get_db()
-collection = db["inventory"]
-
-# Additional collections
+medicines_col = db["medicines"]       # ML dataset
+inventory_col = db["inventory"]
 consumables_col = db["consumables"]
 logs_col = db["usage_log"]
-# -----------------------------
-# Minimal MongoDB helper functions (paste here)
-# These provide load/save/delete used by the clean Inventory UI.
-# -----------------------------
-def load_medicines():
-    """Return medicines as a DataFrame with _id as string (safe for display)."""
-    docs = list(collection.find({}))
-    if not docs:
-        return pd.DataFrame(columns=["UPC","Ingredient","Manufacturer","Batch","Stock","Expiry","_id"])
-    for d in docs:
-        d["_id"] = str(d["_id"])
-    df = pd.DataFrame(docs)
-    # normalize expected columns
-    for c in ["UPC","Ingredient","Manufacturer","Batch","Stock","Expiry","_id"]:
-        if c not in df.columns:
-            df[c] = None
-    # ensure numeric Stock
-    df["Stock"] = pd.to_numeric(df["Stock"], errors="coerce").fillna(0).astype(int)
-    return df
+users_col = db["users"]
 
-def save_medicine(doc: dict):
-    """Insert or update a medicine by UPC+Batch."""
-    key = {"UPC": doc.get("UPC",""), "Batch": doc.get("Batch","")}
-    # if both key fields empty, insert new
-    if not key["UPC"] and not key["Batch"]:
-        collection.insert_one(doc)
-        return
-    existing = collection.find_one(key)
-    # normalize expiry
-    if "Expiry" in doc and doc["Expiry"] is not None:
-        try:
-            doc["Expiry"] = pd.to_datetime(doc["Expiry"]).isoformat()
-        except:
-            doc["Expiry"] = str(doc["Expiry"])
-    if existing:
-        collection.update_one({"_id": existing["_id"]}, {"$set": doc})
-    else:
-        collection.insert_one(doc)
-
-def delete_medicine(id_str: str):
-    """Delete medicine by ObjectId string."""
-    try:
-        collection.delete_one({"_id": ObjectId(id_str)})
-    except Exception as e:
-        raise
-
-def load_consumables():
-    """Return consumables as a DataFrame with _id as string."""
-    docs = list(consumables_col.find({}))
-    if not docs:
-        return pd.DataFrame(columns=[
-            "Item Name","Category","Material Type","Sterility Level",
-            "Expiry Period (Months)","Storage Temperature (C)","Quantity in Stock",
-            "Usage Type","Certification Standard","UPC","Safe/Not Safe","_id"
-        ])
-    for d in docs:
-        d["_id"] = str(d["_id"])
-    df = pd.DataFrame(docs)
-    # ensure numeric quantity
-    if "Quantity in Stock" in df.columns:
-        df["Quantity in Stock"] = pd.to_numeric(df["Quantity in Stock"], errors="coerce").fillna(0).astype(int)
-    return df
-
-def save_consumable(doc: dict):
-    """Insert or update consumable by UPC when provided, else insert."""
-    key = {"UPC": doc.get("UPC")} if doc.get("UPC") else None
-    existing = consumables_col.find_one(key) if key else None
-    if existing:
-        consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
-    else:
-        consumables_col.insert_one(doc)
-
-def delete_consumable(id_str: str):
-    """Delete consumable by ObjectId string."""
-    try:
-        consumables_col.delete_one({"_id": ObjectId(id_str)})
-    except Exception as e:
-        raise
-
-def log_test(entry: dict):
-    """Insert a test log entry."""
-    # ensure timestamp is iso
-    if "timestamp" in entry:
-        try:
-            entry["timestamp"] = pd.to_datetime(entry["timestamp"]).isoformat()
-        except:
-            entry["timestamp"] = datetime.now().isoformat()
-    else:
-        entry["timestamp"] = datetime.now().isoformat()
-    logs_col.insert_one(entry)
-
-def load_logs():
-    docs = list(logs_col.find({}).sort([("_id", -1)]).limit(5000))
-    for d in docs:
-        d["_id"] = str(d["_id"])
-        if "timestamp" in d:
-            d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce")
-    return pd.DataFrame(docs)
-
-# ------------ INIT DB (users) -----------------------
+# ----------------------- INIT USERS -----------------------
 init_user_db()
 
-# --------------- SESSION DEFAULTS --------------
+# ----------------------- SESSION DEFAULTS -----------------------
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 if "username" not in st.session_state:
@@ -285,87 +106,85 @@ if "last_active" not in st.session_state:
     st.session_state["last_active"] = None
 
 
-# ---------------- TIMEOUT CHECK ----------------
-def session_is_timed_out():
+def session_is_timed_out() -> bool:
     last = st.session_state.get("last_active")
     if not last:
         return False
     return (datetime.now() - datetime.fromisoformat(last)).total_seconds() > SESSION_TIMEOUT_SECONDS
-
 
 if st.session_state["authenticated"] and session_is_timed_out():
     st.warning("Session timed out. Login again.")
     st.session_state["authenticated"] = False
     st.rerun()
 
-
-# ---------------- LOGIN FIRST -------------------
+# ----------------------- LOGIN -----------------------
 if not st.session_state["authenticated"]:
     login_router()
     st.stop()
 
-
-# ------- AUTH SUCCESS → READ USER DATA ----------
+# auth success
 username = st.session_state["username"]
 role = st.session_state["role"]
 st.session_state["last_active"] = datetime.now().isoformat()
 
-
-# ------------- APPLY THEME AFTER LOGIN ----------
-st.set_page_config(page_title="Medicine Safety Comparator",
-                   page_icon="💊",
-                   layout="wide")
-
+# ----------------------- PAGE LAYOUT / THEME -----------------------
+st.set_page_config(page_title="Medicine Safety Comparator", page_icon="💊", layout="wide")
 apply_theme()
 apply_layout_styles()
 apply_global_css()
-
 set_background("bg1.jpg")
 show_logo("logo.png")
-
 st.title("💊 Medicine Safety Comparator")
 
-# ===============================
-# File Paths (kept for compatibility but CSVs are not required now)
-# ===============================
-MEDICINE_FILE = "medicine_dataset.csv"
-INVENTORY_FILE = "inventory.csv"
-CONSUMABLES_FILE = "consumables_dataset.csv"
-LOG_FILE = "usage_log.csv"  # legacy name (we now use logs_col)
+# ----------------------- DB HELPER FUNCTIONS -----------------------
 
-# ===============================
-# DB helper functions (Inventory / Consumables / Logs)
-# ===============================
-def _ensure_columns(df, expected):
-    for c in expected:
-        if c not in df.columns:
-            df[c] = None
+def load_medicines_df() -> pd.DataFrame:
+    docs = list(medicines_col.find({}))
+    if not docs:
+        return pd.DataFrame()
+    for d in docs:
+        d["_id"] = str(d["_id"])
+    df = pd.DataFrame(docs)
+    if "UPC" in df.columns:
+        df["UPC"] = df["UPC"].astype(str)
     return df
 
-# --- Inventory helpers ---
-def load_medicines_df():
-    docs = list(collection.find({}))
+
+def replace_medicines_from_df(df: pd.DataFrame):
+    medicines_col.delete_many({})
+    if df.empty:
+        return
+    records = df.to_dict(orient="records")
+    for r in records:
+        for k, v in r.items():
+            if pd.isna(v):
+                r[k] = None
+            elif isinstance(v, (np.integer, np.floating)):
+                r[k] = v.item()
+    if records:
+        medicines_col.insert_many(records)
+
+# Inventory helpers
+
+def load_inventory_df() -> pd.DataFrame:
+    docs = list(inventory_col.find({}))
     if not docs:
-        cols = ["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"]
+        cols = ["UPC","Ingredient","Manufacturer","Batch","Stock","Expiry","_id"]
         return pd.DataFrame(columns=cols)
     for d in docs:
         d["_id"] = str(d["_id"])
     df = pd.DataFrame(docs)
-    expected = ["UPC", "Ingredient", "Manufacturer", "Batch", "Stock", "Expiry"]
-    df = _ensure_columns(df, expected)
     if "Expiry" in df.columns:
         df["Expiry"] = pd.to_datetime(df["Expiry"], errors="coerce")
-    # normalize types
     if "Stock" in df.columns:
         df["Stock"] = pd.to_numeric(df["Stock"], errors="coerce").fillna(0).astype(int)
     return df
 
-def save_medicine_to_db(doc):
-    # doc: dict with UPC, Ingredient, Manufacturer, Batch, Stock, Expiry (expiry may be date or iso str)
+
+def save_inventory_item(doc: dict):
     q = {"UPC": doc.get("UPC"), "Batch": doc.get("Batch")}
-    existing = collection.find_one(q)
-    # Normalize expiry
-    if "Expiry" in doc and pd.notnull(doc["Expiry"]):
+    existing = inventory_col.find_one(q)
+    if "Expiry" in doc and doc["Expiry"]:
         try:
             doc["Expiry"] = pd.to_datetime(doc["Expiry"]).isoformat()
         except Exception:
@@ -380,59 +199,60 @@ def save_medicine_to_db(doc):
         if "Expiry" in doc:
             upd["Expiry"] = doc["Expiry"]
         if upd:
-            collection.update_one({"_id": existing["_id"]}, {"$set": upd})
+            inventory_col.update_one({"_id": existing["_id"]}, {"$set": upd})
         return str(existing["_id"])
     else:
-        collection.insert_one(doc)
+        inventory_col.insert_one(doc)
         return None
 
-def delete_medicine_by_id(obj_id):
-    try:
-        collection.delete_one({"_id": ObjectId(obj_id)})
-    except Exception as e:
-        st.error(f"Delete failed: {e}")
 
-# --- Consumables helpers ---
-def load_consumables_df():
+def update_inventory_by_id(id_str: str, fields: dict):
+    inventory_col.update_one({"_id": ObjectId(id_str)}, {"$set": fields})
+
+
+def delete_inventory_by_id(id_str: str):
+    inventory_col.delete_one({"_id": ObjectId(id_str)})
+
+# Consumables helpers
+
+def load_consumables_df() -> pd.DataFrame:
     docs = list(consumables_col.find({}))
     if not docs:
         cols = [
-            "Item Name", "Category", "Material Type", "Sterility Level",
-            "Expiry Period (Months)", "Storage Temperature (C)", "Quantity in Stock",
-            "Usage Type", "Certification Standard", "UPC", "Safe/Not Safe"
+            "Item Name","Category","Material Type","Sterility Level",
+            "Expiry Period (Months)","Storage Temperature (C)","Quantity in Stock",
+            "Usage Type","Certification Standard","UPC","Safe/Not Safe","_id"
         ]
         return pd.DataFrame(columns=cols)
     for d in docs:
         d["_id"] = str(d["_id"])
     df = pd.DataFrame(docs)
-    # normalize numeric
     if "Quantity in Stock" in df.columns:
         df["Quantity in Stock"] = pd.to_numeric(df["Quantity in Stock"], errors="coerce").fillna(0).astype(int)
     return df
 
-def save_consumable_to_db(doc):
-    # doc should include keys matching the consumables schema
-    q = {"UPC": doc.get("UPC")} if doc.get("UPC") else None
-    existing = consumables_col.find_one(q) if q else None
+
+def save_consumable_item(doc: dict):
+    key = {"UPC": doc.get("UPC")} if doc.get("UPC") else None
+    existing = consumables_col.find_one(key) if key else None
     if existing:
-        upd = {}
-        if "Quantity in Stock" in doc:
-            try:
-                upd["Quantity in Stock"] = int(existing.get("Quantity in Stock", 0)) + int(doc.get("Quantity in Stock", 0))
-            except:
-                upd["Quantity in Stock"] = doc.get("Quantity in Stock")
-        if "Expiry Period (Months)" in doc:
-            upd["Expiry Period (Months)"] = doc.get("Expiry Period (Months)")
-        if upd:
-            consumables_col.update_one({"_id": existing["_id"]}, {"$set": upd})
+        consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
         return str(existing["_id"])
     else:
         consumables_col.insert_one(doc)
         return None
 
-# --- Logs helpers ---
+
+def update_consumable_by_id(id_str: str, fields: dict):
+    consumables_col.update_one({"_id": ObjectId(id_str)}, {"$set": fields})
+
+
+def delete_consumable_by_id(id_str: str):
+    consumables_col.delete_one({"_id": ObjectId(id_str)})
+
+# Logs helpers
+
 def append_log(entry: dict):
-    # ensure timestamp stored as ISO string
     if "timestamp" in entry:
         try:
             entry["timestamp"] = pd.to_datetime(entry["timestamp"]).isoformat()
@@ -442,38 +262,35 @@ def append_log(entry: dict):
         entry["timestamp"] = datetime.now().isoformat()
     logs_col.insert_one(entry)
 
-def load_logs_df(limit=5000):
+
+def load_logs_df(limit=5000) -> pd.DataFrame:
     docs = list(logs_col.find({}).sort([("_id", -1)]).limit(limit))
     if not docs:
-        cols = ["timestamp", "UPC", "Ingredient", "Competitor", "Result"]
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=["timestamp","UPC","Ingredient","Competitor","Result","_id"])
     for d in docs:
         d["_id"] = str(d["_id"])
         if "timestamp" in d:
             d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce")
-    df = pd.DataFrame(docs)
-    return df
+    return pd.DataFrame(docs)
+
 
 def clear_logs_in_db():
     logs_col.delete_many({})
 
-
-# ===============================
-# Load Medicine Dataset (local file for ML model)
-# ===============================
-if not os.path.exists(MEDICINE_FILE):
-    st.error(f"Required dataset '{MEDICINE_FILE}' not found in repository.")
+# ----------------------- ML MODEL SETUP -----------------------
+med_df = load_medicines_df()
+if med_df.empty:
+    st.warning("Medicine dataset for model training is empty.")
+    st.info("Ask an admin to upload the dataset into the 'medicines' collection.")
     st.stop()
 
-df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
-df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
-
-df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
+# Prepare df for training
+df = med_df.copy()
+df["Active Ingredient"] = df.get("Active Ingredient", pd.Series(["Unknown"] * len(df))).fillna("Unknown")
 if "Disease/Use Case" not in df.columns:
     df["Disease/Use Case"] = "Unknown"
 else:
     df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
-
 if "Safe/Not Safe" not in df.columns:
     df["Safe/Not Safe"] = "Safe"
 
@@ -481,7 +298,7 @@ y = df["Safe/Not Safe"]
 le = LabelEncoder()
 y = le.fit_transform(y)
 
-# Ensure dataset has both classes
+# ensure at least two classes
 if len(np.unique(y)) < 2:
     dummy_row = df.iloc[0].copy()
     dummy_row["Active Ingredient"] = "DummyUnsafe"
@@ -500,44 +317,35 @@ numeric_cols = [
     "Warning Labels Present"
 ]
 
-if df["Warning Labels Present"].dtype == "object":
+if "Warning Labels Present" in df.columns and df["Warning Labels Present"].dtype == "object":
     df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0})
 
-X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
+X = df[["Active Ingredient", "Disease/Use Case"] + [c for c in numeric_cols if c in df.columns]]
 
-# ===============================
-# Train Model
-# ===============================
+
 def train_model(X, y):
     numeric_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
     ])
-
     preprocessor = ColumnTransformer(
         transformers=[
             ("text_ing", TfidfVectorizer(max_features=50), "Active Ingredient"),
             ("text_dis", TfidfVectorizer(max_features=50), "Disease/Use Case"),
-            ("num", numeric_transformer, numeric_cols)
+            ("num", numeric_transformer, [c for c in numeric_cols if c in X.columns])
         ]
     )
-
     model = Pipeline(steps=[
         ("preprocessor", preprocessor),
         ("classifier", LogisticRegression(max_iter=1000))
     ])
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X.fillna(0), y, test_size=0.2, random_state=42)
     model.fit(X_train, y_train)
     return model
 
 model = train_model(X, y)
 
-# ===============================
-# Safety Rules
-# ===============================
+# ----------------------- SAFETY RULES -----------------------
 SAFETY_RULES = {
     "Days Until Expiry": {"min": 30},
     "Storage Temperature (C)": {"range": (15, 30)},
@@ -548,46 +356,43 @@ SAFETY_RULES = {
     "Warning Labels Present": {"min": 1}
 }
 
-def suggest_improvements(values):
+def suggest_improvements(values: dict):
     suggestions = []
     for col, val in values.items():
         rule = SAFETY_RULES.get(col, {})
-        if "min" in rule and val < rule["min"]:
+        try:
+            v = float(val)
+        except:
+            v = val
+        if "min" in rule and isinstance(v, (int, float)) and v < rule["min"]:
             suggestions.append(f"Increase *{col}* (min {rule['min']}).")
-        if "max" in rule and val > rule["max"]:
+        if "max" in rule and isinstance(v, (int, float)) and v > rule["max"]:
             suggestions.append(f"Reduce *{col}* (max {rule['max']}).")
-        if "range" in rule:
+        if "range" in rule and isinstance(v, (int, float)):
             low, high = rule["range"]
-            if not (low <= val <= high):
+            if not (low <= v <= high):
                 suggestions.append(f"Keep *{col}* within {low}-{high}.")
     return suggestions
 
-# ===============================
-# Pages & Navigation
-# ===============================
-
-# --------------------
-# Sidebar with avatar + logout + role menu
-# --------------------
-def render_avatar(username, size=72):
-    avatar_path_png = os.path.join("avatars", f"{username}.png")
-    avatar_path_jpg = os.path.join("avatars", f"{username}.jpg")
+# ----------------------- SIDEBAR -----------------------
+def render_avatar(name: Optional[str], size=72):
+    avatar_path_png = os.path.join("avatars", f"{name}.png")
+    avatar_path_jpg = os.path.join("avatars", f"{name}.jpg")
     if os.path.exists(avatar_path_png):
         st.sidebar.image(avatar_path_png, width=size)
         return
     if os.path.exists(avatar_path_jpg):
         st.sidebar.image(avatar_path_jpg, width=size)
         return
-
-    initials = "".join([p[0] for p in username.split()][:2]).upper() if username else "U"
+    initials = "".join([p[0] for p in (name or "User").split()][:2]).upper()
     circle_html = f"""
-    <div style="
+    <div style=""
         width:{size}px;height:{size}px;border-radius:50%;
         background: linear-gradient(135deg,#2E86C1,#5DADE2);
         display:flex;align-items:center;justify-content:center;
         font-weight:700;color:white;font-size:{size//2}px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    ">{initials}</div>
+    "">{initials}</div>
     """
     st.sidebar.markdown(circle_html, unsafe_allow_html=True)
 
@@ -603,8 +408,8 @@ with st.sidebar:
         st.session_state["username"] = None
         st.session_state["role"] = None
         st.session_state["last_active"] = None
-        st.success("Logged out. Redirecting to login...")
-        st.rerun()
+        st.success("Logged out.")
+        st.experimental_rerun()
 
     if role == "admin":
         menu = st.sidebar.radio("📌 Navigation", ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"])
