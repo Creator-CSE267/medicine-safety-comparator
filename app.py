@@ -241,6 +241,31 @@ def suggestions(vals):
 # --------------------------
 # Sidebar Navigation
 # --------------------------
+# --------------------
+# Sidebar with avatar + logout + role menu
+# --------------------
+def render_avatar(username, size=72):
+    avatar_path_png = os.path.join("avatars", f"{username}.png")
+    avatar_path_jpg = os.path.join("avatars", f"{username}.jpg")
+    if os.path.exists(avatar_path_png):
+        st.sidebar.image(avatar_path_png, width=size)
+        return
+    if os.path.exists(avatar_path_jpg):
+        st.sidebar.image(avatar_path_jpg, width=size)
+        return
+
+    initials = "".join([p[0] for p in username.split()][:2]).upper() if username else "U"
+    circle_html = f"""
+    <div style="
+        width:{size}px;height:{size}px;border-radius:50%;
+        background: linear-gradient(135deg,#2E86C1,#5DADE2);
+        display:flex;align-items:center;justify-content:center;
+        font-weight:700;color:white;font-size:{size//2}px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    ">{initials}</div>
+    """
+    st.sidebar.markdown(circle_html, unsafe_allow_html=True)
+
 # -------------------- SIDEBAR ROLE MENU --------------------
 with st.sidebar:
     st.markdown("<h3 style='color:#2E86C1;margin-bottom:6px;'>MedSafe AI</h3>", unsafe_allow_html=True)
