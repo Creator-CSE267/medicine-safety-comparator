@@ -341,9 +341,15 @@ if len(X) != len(y_enc):
     st.stop()
 
 # ===============================
-# Train Model
+# Train Model (robust to tiny/imbalanced classes)
 # ===============================
 def train_model(X, y):
+    """
+    Train pipeline. Uses stratified split where possible.
+    If stratified split fails (too few samples per class) or
+    train split ends up with a single class, we fall back to
+    training on the full dataset to avoid ValueError from sklearn.
+    """
     numeric_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
@@ -354,21 +360,41 @@ def train_model(X, y):
             ("text_ing", TfidfVectorizer(max_features=50), "Active Ingredient"),
             ("text_dis", TfidfVectorizer(max_features=50), "Disease/Use Case"),
             ("num", numeric_transformer, numeric_cols)
-        ]
+        ],
+        remainder="drop"
     )
 
-    model = Pipeline(steps=[
+    clf_pipeline = Pipeline(steps=[
         ("preprocessor", preprocessor),
         ("classifier", LogisticRegression(max_iter=1000))
     ])
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-    model.fit(X_train, y_train)
-    return model
+    # Ensure y is a 1-D array/series
+    y_arr = np.asarray(y)
 
+    # try stratified split first (keeps class distribution)
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y_arr, test_size=0.2, random_state=42, stratify=y_arr
+        )
+    except Exception:
+        # fallback: don't split if stratify failed (likely insufficient samples per class)
+        X_train, y_train = X, y_arr
+        clf_pipeline.fit(X_train, y_train)
+        return clf_pipeline
+
+    # if train split ended up with single class (possible with extremely small data), fallback to full training
+    if len(np.unique(y_train)) < 2:
+        clf_pipeline.fit(X, y_arr)
+        return clf_pipeline
+
+    # normal case
+    clf_pipeline.fit(X_train, y_train)
+    return clf_pipeline
+
+# Build model using robust trainer
 model = train_model(X, y_enc)
+
 
 # ===============================
 # Safety Rules & suggestions
