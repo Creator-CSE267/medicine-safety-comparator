@@ -740,31 +740,240 @@ if st.button("🔎 Compare"):
 
 
 # =========================================================
-# 📊 DASHBOARD
+# 📊 DASHBOARD (professional, robust, interactive)
 # =========================================================
 elif menu == "📊 Dashboard":
-    st.header("📊 Dashboard")
-    logs = list(log_col.find({}).sort([("_id", -1)]))
-    if not logs:
-        st.info("No logs yet.")
+    st.header("📊 Test Results Dashboard")
+    st.markdown(
+        "Overview of recent medicine safety comparisons. "
+        "Use filters to narrow results, inspect details, or download logs."
+    )
+
+    # --- Load logs safely ---
+    try:
+        raw_logs = list(log_col.find({}).sort([("_id", -1)]))
+    except Exception as e:
+        raw_logs = []
+        st.warning("Unable to load logs from MongoDB: " + str(e))
+
+    if not raw_logs:
+        st.info("No logs found. Run some tests from the Testing page to populate logs.")
     else:
-        logs_df = pd.DataFrame(logs)
-        logs_df["timestamp"] = pd.to_datetime(logs_df["timestamp"])
+        # Convert to DataFrame and normalize fields
+        logs_df = pd.DataFrame(raw_logs)
 
-        total = len(logs_df)
-        safe = logs_df["Result"].str.lower().eq("safe").sum()
-        unsafe = logs_df["Result"].str.lower().eq("not safe").sum()
+        # Ensure timestamp exists and parse robustly
+        if "timestamp" in logs_df.columns:
+            try:
+                logs_df["timestamp"] = pd.to_datetime(logs_df["timestamp"], errors="coerce")
+            except Exception:
+                logs_df["timestamp"] = pd.to_datetime(logs_df["timestamp"].astype(str), errors="coerce")
+        else:
+            logs_df["timestamp"] = pd.NaT
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Tests", total)
-        col2.metric("Safe", safe)
-        col3.metric("Unsafe", unsafe)
+        # Normalize common columns (fallback names)
+        logs_df["UPC"] = logs_df.get("UPC", logs_df.get("upc", ""))
+        logs_df["Ingredient"] = logs_df.get("Ingredient", logs_df.get("ingredient", ""))
+        logs_df["Competitor"] = logs_df.get("Competitor", logs_df.get("competitor", ""))
+        logs_df["Result"] = logs_df.get("Result", logs_df.get("result", "Unknown"))
 
-        trend = logs_df.groupby(logs_df["timestamp"].dt.date).size()
-        st.line_chart(trend)
+        # Normalize suggestions if present (list -> string)
+        def _format_sugg(v):
+            if v is None:
+                return ""
+            if isinstance(v, (list, tuple)):
+                return " | ".join(map(str, v))
+            # sometimes stored as dict or str
+            if isinstance(v, dict):
+                # join dict values
+                return " | ".join(f"{k}: {v[k]}" for k in v)
+            return str(v)
 
-        st.subheader("Recent 10 Tests")
-        st.dataframe(logs_df.head(10)[["timestamp", "UPC", "Ingredient", "Competitor", "Result"]])
+        logs_df["suggestions_text"] = _format_sugg  # placeholder to be used by apply
+        logs_df["suggestions_text"] = logs_df.get("suggestions", logs_df.get("suggestions_text", "")) \
+            .apply(_format_sugg) if "suggestions" in logs_df.columns else ""
+
+        # Provide nice KPIs
+        total_tests = len(logs_df)
+        safe_count = logs_df["Result"].astype(str).str.lower().eq("safe").sum()
+        unsafe_count = logs_df["Result"].astype(str).str.lower().eq("not safe").sum()
+
+        k1, k2, k3 = st.columns([1.2, 0.9, 0.9])
+        k1.metric("Total Tests", f"{total_tests:,}")
+        k2.metric("Safe", f"{int(safe_count):,}")
+        k3.metric("Not Safe", f"{int(unsafe_count):,}")
+
+        # Filters: date range and result type
+        with st.expander("Filters", expanded=False):
+            colf1, colf2, colf3 = st.columns([1, 1, 1])
+            # date range default to last 30 days
+            max_ts = logs_df["timestamp"].max()
+            min_ts = logs_df["timestamp"].min()
+            if pd.isna(min_ts) or pd.isna(max_ts):
+                # fallback to today
+                min_def = datetime.now().date()
+                max_def = datetime.now().date()
+            else:
+                min_def = (max_ts - pd.Timedelta(days=30)).date()
+                max_def = max_ts.date()
+
+            date_from = colf1.date_input("From", value=min_def)
+            date_to = colf1.date_input("To", value=max_def)
+            result_filter = colf2.selectbox("Result", ["All", "Safe", "Not Safe", "Unknown"])
+            text_search = colf3.text_input("Search (UPC / Ingredient / Competitor)")
+
+        # Apply filters
+        df_filtered = logs_df.copy()
+        # date filter
+        try:
+            df_filtered = df_filtered[
+                (df_filtered["timestamp"].dt.date >= date_from) &
+                (df_filtered["timestamp"].dt.date <= date_to)
+            ]
+        except Exception:
+            # if timestamp parsing failed, ignore date filter
+            pass
+
+        # result filter
+        if result_filter != "All":
+            df_filtered = df_filtered[df_filtered["Result"].astype(str).str.lower() == result_filter.lower()]
+
+        # text search
+        if text_search and text_search.strip():
+            q = text_search.strip().lower()
+            df_filtered = df_filtered[
+                df_filtered["UPC"].astype(str).str.lower().str.contains(q, na=False) |
+                df_filtered["Ingredient"].astype(str).str.lower().str.contains(q, na=False) |
+                df_filtered["Competitor"].astype(str).str.lower().str.contains(q, na=False)
+            ]
+
+        # Trend chart (tests per day)
+        try:
+            trend = df_filtered.dropna(subset=["timestamp"]).groupby(df_filtered["timestamp"].dt.date).size()
+            if not trend.empty:
+                st.altair_chart(
+                    (px.line(x=trend.index, y=trend.values, labels={"x": "Date", "y": "Tests"})
+                     .update_layout(margin=dict(l=20, r=20, t=20, b=20))),
+                    use_container_width=True
+                )
+        except Exception:
+            pass
+
+        # Prepare Recent Tests table (most recent first)
+        to_show = df_filtered.sort_values(by="timestamp", ascending=False).head(20).copy()
+        # Format timestamp for display
+        if "timestamp" in to_show.columns:
+            to_show["timestamp"] = to_show["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Select columns to display
+        display_cols = ["timestamp", "UPC", "Ingredient", "Competitor", "Result", "suggestions_text"]
+        display_cols = [c for c in display_cols if c in to_show.columns]
+
+        # Build a styled table: color Result cell
+        def _result_color(val):
+            s = str(val).lower()
+            if s == "safe":
+                return "background-color: #e6f4ea; color: #0b6623; font-weight:600;"
+            if s == "not safe":
+                return "background-color: #fdecea; color: #a80000; font-weight:600;"
+            return ""
+
+        st.markdown("### Recent Tests")
+        try:
+            styled = to_show[display_cols].style.applymap(lambda v: _result_color(v) if isinstance(v, str) and v in to_show["Result"].values else "", subset=["Result"])
+            # ensure 'Suggestions' column is readable label
+            rename_map = {"suggestions_text": "Suggestions", "timestamp": "Date"}
+            st.write(styled.rename(columns=rename_map))
+        except Exception:
+            # fallback: plain table
+            st.dataframe(to_show[display_cols].rename(columns={"suggestions_text": "Suggestions", "timestamp": "Date"}), use_container_width=True)
+
+        # Expandable details for each recent test (professional layout)
+        st.markdown("### Inspect Results")
+        for idx, row in to_show.iterrows():
+            ts = row.get("timestamp", "")
+            label = f"{ts} — {row.get('Ingredient','')} — {row.get('Result','')}"
+            with st.expander(label, expanded=False):
+                # left / right columns
+                cL, cR = st.columns([2, 1])
+                with cL:
+                    st.subheader("Test Details")
+                    st.write("**UPC:**", row.get("UPC", ""))
+                    st.write("**Ingredient:**", row.get("Ingredient", ""))
+                    st.write("**Competitor:**", row.get("Competitor", ""))
+                    st.write("**Result:**", row.get("Result", ""))
+                    if "confidence" in row:
+                        st.write("**Confidence:**", row.get("confidence"))
+                    # suggestions block (black text, professional typography)
+                    sugg = row.get("suggestions", row.get("suggestions_text", ""))
+                    if sugg:
+                        st.markdown("<div style='color:#111111; font-weight:600; margin-top:8px;'>Suggested Improvements</div>", unsafe_allow_html=True)
+                        # show each suggestion on its own line
+                        if isinstance(sugg, (list, tuple)):
+                            for s in sugg:
+                                st.markdown(f"- {s}")
+                        else:
+                            # if suggestions_text string (pipe-separated), split for readability
+                            if isinstance(sugg, str) and " | " in sugg:
+                                for s in sugg.split(" | "):
+                                    st.markdown(f"- {s.strip()}")
+                            else:
+                                st.markdown(f"- {sugg}")
+                    # show any saved per-criterion details if present
+                    if "details" in row and row["details"]:
+                        st.markdown("**Per-criterion details:**")
+                        try:
+                            for d in row["details"]:
+                                st.markdown(f"- {d}")
+                        except Exception:
+                            st.write(row["details"])
+
+                with cR:
+                    st.subheader("Raw Log")
+                    # show compact JSON-like record for audit
+                    clean_row = row.to_dict()
+                    # remove big objects if any
+                    for k in ["chart", "image", "file"] :
+                        if k in clean_row:
+                            clean_row.pop(k, None)
+                    st.json(clean_row)
+
+        # Downloads: recent view and full logs
+        download_col1, download_col2 = st.columns(2)
+        try:
+            # recent view CSV
+            recent_csv = to_show[display_cols].to_csv(index=False).encode("utf-8")
+            download_col1.download_button(
+                "⬇️ Download shown logs (CSV)",
+                data=recent_csv,
+                file_name=f"medsafe_shown_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        except Exception:
+            download_col1.info("Recent logs download unavailable.")
+
+        try:
+            full_csv = logs_df.to_csv(index=False).encode("utf-8")
+            download_col2.download_button(
+                "⬇️ Download ALL logs (CSV)",
+                data=full_csv,
+                file_name=f"medsafe_all_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        except Exception:
+            download_col2.info("Full logs download unavailable.")
+
+        # Optional admin action: clear logs (dangerous) — show only to admin role
+        if (role or "").strip().lower() == "admin":
+            with st.expander("Admin actions", expanded=False):
+                if st.button("⚠️ Clear all logs (ADMIN ONLY)"):
+                    try:
+                        log_col.delete_many({})
+                        st.success("All logs deleted.")
+                        st.experimental_rerun()
+                    except Exception as e:
+                        st.error("Failed to clear logs: " + str(e))
+
 
 
 
