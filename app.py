@@ -286,7 +286,7 @@ with st.sidebar:
         st.success("Logged out. Redirecting to login...")
         st.rerun()
 
-    role_normalized = role.strip().lower()
+    role_normalized = (role or "").strip().lower()
 
     if role_normalized == "admin":
         allowed_tabs = ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"]
@@ -389,7 +389,7 @@ if menu == "🧪 Testing":
 # =========================================================
 elif menu == "📊 Dashboard":
     st.header("📊 Dashboard")
-    logs = list(log_col.find({}).sort("_id", -1))
+    logs = list(log_col.find({}).sort([("_id", -1)]))
     if not logs:
         st.info("No logs yet.")
     else:
