@@ -1140,7 +1140,7 @@ elif menu == "📦 Inventory":
                     df_filtered = df_filtered[df_filtered["Stock"] <= int(f_low_stock)]
             return df_filtered
 
- def apply_consumable_filters(df):
+def apply_consumable_filters(df):
     with st.expander("🔎 Filters", expanded=False):
         col1, col2, col3 = st.columns(3)
 
@@ -1148,24 +1148,45 @@ elif menu == "📦 Inventory":
         f_cat = col1.text_input("Filter Category", value="", key="cons_filter_cat")
         f_upc = col2.text_input("Filter UPC", value="", key="cons_filter_upc")
         f_safe = col3.selectbox("Safe / Not Safe", ["All", "Safe", "Not Safe"], key="cons_filter_safe")
-        f_low_qty = col3.number_input("Low qty threshold (≤)", min_value=0, value=0, step=1, key="cons_filter_low_qty")
+        f_low_qty = col3.number_input(
+            "Low qty threshold (≤)", 
+            min_value=0, 
+            value=0, 
+            step=1, 
+            key="cons_filter_low_qty"
+        )
 
         df_filtered = df.copy()
 
         if f_name.strip():
-            df_filtered = df_filtered[df_filtered["Item Name"].astype(str).str.contains(f_name.strip(), case=False, na=False)]
+            df_filtered = df_filtered[
+                df_filtered["Item Name"].astype(str).str.contains(f_name.strip(), case=False, na=False)
+            ]
+
         if f_cat.strip():
-            df_filtered = df_filtered[df_filtered["Category"].astype(str).str.contains(f_cat.strip(), case=False, na=False)]
+            df_filtered = df_filtered[
+                df_filtered["Category"].astype(str).str.contains(f_cat.strip(), case=False, na=False)
+            ]
+
         if f_upc.strip():
-            df_filtered = df_filtered[df_filtered["UPC"].astype(str).str.contains(f_upc.strip(), case=False, na=False)]
+            df_filtered = df_filtered[
+                df_filtered["UPC"].astype(str).str.contains(f_upc.strip(), case=False, na=False)
+            ]
+
         if f_safe != "All":
             df_filtered = df_filtered[df_filtered["Safe/Not Safe"] == f_safe]
+
         if f_low_qty > 0:
             if "Quantity in Stock" in df_filtered.columns:
-                df_filtered["Quantity in Stock"] = pd.to_numeric(df_filtered["Quantity in Stock"], errors="coerce").fillna(0).astype(int)
+                df_filtered["Quantity in Stock"] = (
+                    pd.to_numeric(df_filtered["Quantity in Stock"], errors="coerce")
+                    .fillna(0)
+                    .astype(int)
+                )
                 df_filtered = df_filtered[df_filtered["Quantity in Stock"] <= int(f_low_qty)]
 
         return df_filtered
+
 
 
     # ===========================
