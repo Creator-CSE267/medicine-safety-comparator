@@ -556,194 +556,189 @@ if menu == "🧪 Testing":
     # -------------------------
     comp_vals = {}
     for c in num_cols:
-        # default value is 0.0 so user must provide values (no auto-populate from standard)
         comp_vals[c] = st.number_input(f"{c}", value=0.0, format="%.2f")
 
     # -------------------------
+    # Helper: build competitor DataFrame (kept local to testing flow)
     # -------------------------
-# Helper: build competitor DataFrame for model
-# (keep this defined inside the Testing page)
-# -------------------------
-def build_comp_df(active_ing, disease, numeric_dict):
-    rec = {"Active Ingredient": active_ing or "Unknown", "Disease/Use Case": disease or "Unknown"}
-    for cc in num_cols:
-        try:
-            rec[cc] = float(numeric_dict.get(cc, 0.0))
-        except Exception:
-            rec[cc] = 0.0
-    return pd.DataFrame([rec])
-
-# -------------------------
-# Compare button: run rule-based comparator, show suggestions, chart, logging, PDF
-# (This must be INSIDE the Testing page block)
-# -------------------------
-if st.button("🔎 Compare"):
-    # validate input
-    if selected is None and (not ingr_input or ingr_input.strip() == ""):
-        st.error("⚠️ Please enter a valid UPC or Active Ingredient first.")
-    else:
-        # Use ingredient text (user provided or selected)
-        active_ing = ingr_input if ingr_input else (selected.get("Active Ingredient") if selected is not None else "Unknown")
-        disease = selected.get("Disease/Use Case", "Unknown") if selected is not None else "Unknown"
-
-        # Build competitor dict from comp_vals (user inputs)
-        competitor_dict = {}
-        for c in num_cols:
+    def build_comp_df(active_ing, disease, numeric_dict):
+        rec = {"Active Ingredient": active_ing or "Unknown", "Disease/Use Case": disease or "Unknown"}
+        for cc in num_cols:
             try:
-                competitor_dict[c] = float(comp_vals.get(c, 0.0))
+                rec[cc] = float(numeric_dict.get(cc, 0.0))
             except Exception:
-                competitor_dict[c] = 0.0
+                rec[cc] = 0.0
+        return pd.DataFrame([rec])
 
-        # Get std_row for this active ingredient (fallback to global)
-        try:
-            std_row = std_stats.loc[active_ing]
-        except Exception:
-            std_row = global_std
-
-        # Run the strict rule-based comparator (your deterministic rules)
-        rule_out = predict_rule_based(active_ing, competitor_dict, std_row=std_row)
-        result = rule_out["result"]
-        details = rule_out["details"]
-        confidence = rule_out["confidence"]
-
-        # Display result + details
-        if result.lower() == "safe":
-            st.success(f"✅ Prediction → {result} (confidence {confidence:.2f})")
+    # -------------------------
+    # Compare button: everything below runs only on Testing page
+    # -------------------------
+    if st.button("🔎 Compare"):
+        # validate input
+        if selected is None and (not ingr_input or ingr_input.strip() == ""):
+            st.error("⚠️ Please enter a valid UPC or Active Ingredient first.")
         else:
-            st.error(f"❌ Prediction → {result} (confidence {confidence:.2f})")
+            # Use ingredient text (user provided or selected)
+            active_ing = ingr_input if ingr_input else (selected.get("Active Ingredient") if selected is not None else "Unknown")
+            disease = selected.get("Disease/Use Case", "Unknown") if selected is not None else "Unknown"
 
-        st.markdown("### 🔎 Per-criterion details")
-        for d in details:
-            # color-coded lines
-            if "PASS" in d:
-                st.markdown(f"<div style='color:green'>{d}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
-
-        # Generate suggestions from rule-based check (based on competitor values)
-        suggestions_list = suggestions(competitor_dict)  # ensure this is defined BEFORE using
-        if suggestions_list:
-            # show suggestions in black color (user request)
-            st.subheader("🔧 Suggested Improvements")
-            for s in suggestions_list:
-                st.markdown(f"<div style='color:#111111'>{s}</div>", unsafe_allow_html=True)
-
-        # Chart compare standard vs competitor
-        fig, ax = plt.subplots(figsize=(10, 4))
-        x = np.arange(len(num_cols))
-        std_vals = [float(std_row.get(c, 0.0) or 0.0) for c in num_cols]
-        comp_vals_list = [competitor_dict[c] for c in num_cols]
-
-        ax.bar(x - 0.3, std_vals, width=0.3, label="Standard")
-        ax.bar(x + 0.3, comp_vals_list, width=0.3, label="Competitor")
-        ax.set_xticks(x)
-        ax.set_xticklabels(num_cols, rotation=35, ha="right")
-        ax.legend()
-        st.pyplot(fig)
-
-        # Log result (try Mongo first, else CSV)
-        log_doc = {
-            "timestamp": datetime.now().isoformat(),
-            "UPC": upc_input,
-            "Ingredient": active_ing,
-            "Competitor": comp_name,
-            "Result": result,
-            "confidence": confidence,
-            "details": details,
-            "suggestions": suggestions_list
-        }
-        logged = False
-        try:
-            log_col.insert_one(log_doc)
-            logged = True
-            st.info("Logged result to MongoDB.")
-        except Exception:
-            st.warning("MongoDB logging failed — falling back to CSV.")
-        if not logged:
-            try:
-                lf = "test_logs.csv"
-                pd.DataFrame([log_doc]).to_csv(lf, mode="a", header=not os.path.exists(lf), index=False)
-                st.info(f"Logged result to CSV: {lf}")
-            except Exception:
-                st.error("Failed to log result.")
-
-        # Build PDF (include suggestions_list)
-        try:
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-            from reportlab.lib.styles import getSampleStyleSheet
-            from reportlab.lib.pagesizes import A4
-            from reportlab.lib.utils import ImageReader
-            import io
-
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=A4)
-            styles = getSampleStyleSheet()
-            elements = []
-
-            if os.path.exists("logo.png"):
+            # Build competitor dict from comp_vals (user inputs)
+            competitor_dict = {}
+            for c in num_cols:
                 try:
-                    elements.append(RLImage("logo.png", width=100, height=100))
+                    competitor_dict[c] = float(comp_vals.get(c, 0.0))
+                except Exception:
+                    competitor_dict[c] = 0.0
+
+            # Get std_row for this active ingredient (fallback to global)
+            try:
+                std_row = std_stats.loc[active_ing]
+            except Exception:
+                std_row = global_std
+
+            # Run the strict rule-based comparator
+            rule_out = predict_rule_based(active_ing, competitor_dict, std_row=std_row)
+            result = rule_out["result"]
+            details = rule_out["details"]
+            confidence = rule_out["confidence"]
+
+            # Show result
+            if result.lower() == "safe":
+                st.success(f"✅ Prediction → {result} (confidence {confidence:.2f})")
+            else:
+                st.error(f"❌ Prediction → {result} (confidence {confidence:.2f})")
+
+            # Per-criterion details
+            st.markdown("### 🔎 Per-criterion details")
+            for d in details:
+                if "PASS" in d:
+                    st.markdown(f"<div style='color:green'>{d}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
+
+            # Suggestions (black text as requested)
+            suggestions_list = suggestions(competitor_dict)
+            if suggestions_list:
+                st.subheader("🔧 Suggested Improvements")
+                for s in suggestions_list:
+                    st.markdown(f"<div style='color:#111111'>{s}</div>", unsafe_allow_html=True)
+
+            # Chart compare standard vs competitor
+            fig, ax = plt.subplots(figsize=(10, 4))
+            x = np.arange(len(num_cols))
+            std_vals = [float(std_row.get(c, 0.0) or 0.0) for c in num_cols]
+            comp_vals_list = [competitor_dict[c] for c in num_cols]
+
+            ax.bar(x - 0.3, std_vals, width=0.3, label="Standard")
+            ax.bar(x + 0.3, comp_vals_list, width=0.3, label="Competitor")
+            ax.set_xticks(x)
+            ax.set_xticklabels(num_cols, rotation=35, ha="right")
+            ax.legend()
+            st.pyplot(fig)
+
+            # Logging: try Mongo then CSV fallback
+            log_doc = {
+                "timestamp": datetime.now().isoformat(),
+                "UPC": upc_input,
+                "Ingredient": active_ing,
+                "Competitor": comp_name,
+                "Result": result,
+                "confidence": confidence,
+                "details": details,
+                "suggestions": suggestions_list
+            }
+            logged = False
+            try:
+                log_col.insert_one(log_doc)
+                logged = True
+                st.info("Logged result to MongoDB.")
+            except Exception:
+                st.warning("MongoDB logging failed — falling back to CSV.")
+            if not logged:
+                try:
+                    lf = "test_logs.csv"
+                    pd.DataFrame([log_doc]).to_csv(lf, mode="a", header=not os.path.exists(lf), index=False)
+                    st.info(f"Logged result to CSV: {lf}")
+                except Exception:
+                    st.error("Failed to log result.")
+
+            # PDF Report (includes suggestions if present)
+            try:
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+                from reportlab.lib.styles import getSampleStyleSheet
+                from reportlab.lib.pagesizes import A4
+                from reportlab.lib.utils import ImageReader
+                import io
+
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=A4)
+                styles = getSampleStyleSheet()
+                elements = []
+
+                if os.path.exists("logo.png"):
+                    try:
+                        elements.append(RLImage("logo.png", width=100, height=100))
+                        elements.append(Spacer(1, 12))
+                    except Exception:
+                        pass
+
+                elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
+                elements.append(Spacer(1, 12))
+                elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
+                elements.append(Paragraph(f"UPC: {selected['UPC'] if selected is not None else 'N/A'}", styles["Normal"]))
+                elements.append(Paragraph(f"Ingredient: {active_ing}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
+                elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
+                elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
+                elements.append(Paragraph(f"Address: {comp_addr}", styles["Normal"]))
+                elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
+                if result.lower() == "safe":
+                    elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
+                else:
+                    elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                if suggestions_list:
+                    elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
+                    for s in suggestions_list:
+                        elements.append(Paragraph(f"- {s}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+
+                elements.append(Paragraph("<b>Criteria Comparison (Standard vs Competitor)</b>", styles["Heading2"]))
+                for idx, c in enumerate(num_cols):
+                    elements.append(Paragraph(f"{c}: Standard = {std_vals[idx]}  |  Competitor = {comp_vals_list[idx]}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                # attach chart
+                chart_buffer = io.BytesIO()
+                fig.savefig(chart_buffer, format="png", bbox_inches="tight")
+                chart_buffer.seek(0)
+                try:
+                    img_reader = ImageReader(chart_buffer)
+                    elements.append(RLImage(img_reader, width=400, height=250))
                     elements.append(Spacer(1, 12))
                 except Exception:
                     pass
 
-            elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
-            elements.append(Spacer(1, 12))
-            elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
+                doc.build(elements)
+                buffer.seek(0)
 
-            elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
-            elements.append(Paragraph(f"UPC: {selected['UPC'] if selected is not None else 'N/A'}", styles["Normal"]))
-            elements.append(Paragraph(f"Ingredient: {active_ing}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
-
-            elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
-            elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
-            elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
-            elements.append(Paragraph(f"Address: {comp_addr}", styles["Normal"]))
-            elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
-
-            elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-            if result.lower() == "safe":
-                elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
-            else:
-                elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
-            elements.append(Spacer(1, 12))
-
-            if suggestions_list:
-                elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
-                for s in suggestions_list:
-                    elements.append(Paragraph(f"- {s}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-            elements.append(Paragraph("<b>Criteria Comparison (Standard vs Competitor)</b>", styles["Heading2"]))
-            for idx, c in enumerate(num_cols):
-                elements.append(Paragraph(f"{c}: Standard = {std_vals[idx]}  |  Competitor = {comp_vals_list[idx]}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
-
-            # attach chart
-            chart_buffer = io.BytesIO()
-            fig.savefig(chart_buffer, format="png", bbox_inches="tight")
-            chart_buffer.seek(0)
-            try:
-                img_reader = ImageReader(chart_buffer)
-                elements.append(RLImage(img_reader, width=400, height=250))
-                elements.append(Spacer(1, 12))
-            except Exception:
-                pass
-
-            doc.build(elements)
-            buffer.seek(0)
-
-            st.download_button(
-                label="⬇️ Download PDF Report",
-                data=buffer.getvalue(),
-                file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                mime="application/pdf"
-            )
-        except Exception as e:
-            st.warning("Failed to generate PDF report: " + str(e))
+                st.download_button(
+                    label="⬇️ Download PDF Report",
+                    data=buffer.getvalue(),
+                    file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.warning("Failed to generate PDF report: " + str(e))
 
 
 
@@ -792,17 +787,13 @@ elif menu == "📊 Dashboard":
                 return ""
             if isinstance(v, (list, tuple)):
                 return " | ".join(map(str, v))
-            # sometimes stored as dict or str
             if isinstance(v, dict):
-                # join dict values
                 return " | ".join(f"{k}: {v[k]}" for k in v)
             return str(v)
 
-        logs_df["suggestions_text"] = _format_sugg  # placeholder to be used by apply
-        logs_df["suggestions_text"] = logs_df.get("suggestions", logs_df.get("suggestions_text", "")) \
-            .apply(_format_sugg) if "suggestions" in logs_df.columns else ""
+        logs_df["suggestions_text"] = logs_df.get("suggestions", "").apply(_format_sugg) if "suggestions" in logs_df.columns else ""
 
-        # Provide nice KPIs
+        # Provide KPIs
         total_tests = len(logs_df)
         safe_count = logs_df["Result"].astype(str).str.lower().eq("safe").sum()
         unsafe_count = logs_df["Result"].astype(str).str.lower().eq("not safe").sum()
@@ -815,11 +806,9 @@ elif menu == "📊 Dashboard":
         # Filters: date range and result type
         with st.expander("Filters", expanded=False):
             colf1, colf2, colf3 = st.columns([1, 1, 1])
-            # date range default to last 30 days
             max_ts = logs_df["timestamp"].max()
             min_ts = logs_df["timestamp"].min()
             if pd.isna(min_ts) or pd.isna(max_ts):
-                # fallback to today
                 min_def = datetime.now().date()
                 max_def = datetime.now().date()
             else:
@@ -833,21 +822,17 @@ elif menu == "📊 Dashboard":
 
         # Apply filters
         df_filtered = logs_df.copy()
-        # date filter
         try:
             df_filtered = df_filtered[
                 (df_filtered["timestamp"].dt.date >= date_from) &
                 (df_filtered["timestamp"].dt.date <= date_to)
             ]
         except Exception:
-            # if timestamp parsing failed, ignore date filter
             pass
 
-        # result filter
         if result_filter != "All":
             df_filtered = df_filtered[df_filtered["Result"].astype(str).str.lower() == result_filter.lower()]
 
-        # text search
         if text_search and text_search.strip():
             q = text_search.strip().lower()
             df_filtered = df_filtered[
@@ -856,7 +841,7 @@ elif menu == "📊 Dashboard":
                 df_filtered["Competitor"].astype(str).str.lower().str.contains(q, na=False)
             ]
 
-        # Trend chart (tests per day)
+        # Trend chart
         try:
             trend = df_filtered.dropna(subset=["timestamp"]).groupby(df_filtered["timestamp"].dt.date).size()
             if not trend.empty:
@@ -868,42 +853,27 @@ elif menu == "📊 Dashboard":
         except Exception:
             pass
 
-        # Prepare Recent Tests table (most recent first)
+        # Recent Tests table
         to_show = df_filtered.sort_values(by="timestamp", ascending=False).head(20).copy()
-        # Format timestamp for display
         if "timestamp" in to_show.columns:
             to_show["timestamp"] = to_show["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Select columns to display
         display_cols = ["timestamp", "UPC", "Ingredient", "Competitor", "Result", "suggestions_text"]
         display_cols = [c for c in display_cols if c in to_show.columns]
 
-        # Build a styled table: color Result cell
-        def _result_color(val):
-            s = str(val).lower()
-            if s == "safe":
-                return "background-color: #e6f4ea; color: #0b6623; font-weight:600;"
-            if s == "not safe":
-                return "background-color: #fdecea; color: #a80000; font-weight:600;"
-            return ""
-
         st.markdown("### Recent Tests")
         try:
-            styled = to_show[display_cols].style.applymap(lambda v: _result_color(v) if isinstance(v, str) and v in to_show["Result"].values else "", subset=["Result"])
-            # ensure 'Suggestions' column is readable label
-            rename_map = {"suggestions_text": "Suggestions", "timestamp": "Date"}
-            st.write(styled.rename(columns=rename_map))
+            # show readable dataframe; leave coloring to expanders/details
+            st.dataframe(to_show[display_cols].rename(columns={"timestamp": "Date", "suggestions_text": "Suggestions"}), use_container_width=True)
         except Exception:
-            # fallback: plain table
-            st.dataframe(to_show[display_cols].rename(columns={"suggestions_text": "Suggestions", "timestamp": "Date"}), use_container_width=True)
+            st.dataframe(to_show[display_cols].rename(columns={"timestamp": "Date", "suggestions_text": "Suggestions"}), use_container_width=True)
 
-        # Expandable details for each recent test (professional layout)
+        # Expandable details for each recent test
         st.markdown("### Inspect Results")
         for idx, row in to_show.iterrows():
             ts = row.get("timestamp", "")
             label = f"{ts} — {row.get('Ingredient','')} — {row.get('Result','')}"
             with st.expander(label, expanded=False):
-                # left / right columns
                 cL, cR = st.columns([2, 1])
                 with cL:
                     st.subheader("Test Details")
@@ -911,24 +881,22 @@ elif menu == "📊 Dashboard":
                     st.write("**Ingredient:**", row.get("Ingredient", ""))
                     st.write("**Competitor:**", row.get("Competitor", ""))
                     st.write("**Result:**", row.get("Result", ""))
-                    if "confidence" in row:
+                    if "confidence" in row and pd.notna(row.get("confidence")):
                         st.write("**Confidence:**", row.get("confidence"))
-                    # suggestions block (black text, professional typography)
+                    # suggestions block in black
                     sugg = row.get("suggestions", row.get("suggestions_text", ""))
                     if sugg:
                         st.markdown("<div style='color:#111111; font-weight:600; margin-top:8px;'>Suggested Improvements</div>", unsafe_allow_html=True)
-                        # show each suggestion on its own line
                         if isinstance(sugg, (list, tuple)):
                             for s in sugg:
                                 st.markdown(f"- {s}")
                         else:
-                            # if suggestions_text string (pipe-separated), split for readability
                             if isinstance(sugg, str) and " | " in sugg:
                                 for s in sugg.split(" | "):
                                     st.markdown(f"- {s.strip()}")
                             else:
                                 st.markdown(f"- {sugg}")
-                    # show any saved per-criterion details if present
+
                     if "details" in row and row["details"]:
                         st.markdown("**Per-criterion details:**")
                         try:
@@ -939,18 +907,15 @@ elif menu == "📊 Dashboard":
 
                 with cR:
                     st.subheader("Raw Log")
-                    # show compact JSON-like record for audit
                     clean_row = row.to_dict()
-                    # remove big objects if any
-                    for k in ["chart", "image", "file"] :
+                    for k in ["chart", "image", "file"]:
                         if k in clean_row:
                             clean_row.pop(k, None)
                     st.json(clean_row)
 
-        # Downloads: recent view and full logs
+        # Downloads
         download_col1, download_col2 = st.columns(2)
         try:
-            # recent view CSV
             recent_csv = to_show[display_cols].to_csv(index=False).encode("utf-8")
             download_col1.download_button(
                 "⬇️ Download shown logs (CSV)",
@@ -972,7 +937,7 @@ elif menu == "📊 Dashboard":
         except Exception:
             download_col2.info("Full logs download unavailable.")
 
-        # Optional admin action: clear logs (dangerous) — show only to admin role
+        # Admin clear logs
         if (role or "").strip().lower() == "admin":
             with st.expander("Admin actions", expanded=False):
                 if st.button("⚠️ Clear all logs (ADMIN ONLY)"):
@@ -982,6 +947,7 @@ elif menu == "📊 Dashboard":
                         st.experimental_rerun()
                     except Exception as e:
                         st.error("Failed to clear logs: " + str(e))
+
 
 
 
