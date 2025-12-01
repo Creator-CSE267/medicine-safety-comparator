@@ -616,13 +616,11 @@ if st.button("🔎 Compare"):
                 st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
 
         # Generate suggestions and display them
-        if suggestions_list:
-            st.subheader("🔧 Suggested Improvements")
-            for s in suggestions_list:
-                st.markdown(
-                    f"<div style='color:#000000; font-weight:normal; margin-bottom:6px;'>- {s}</div>",
-                    unsafe_allow_html=True
-                )
+if suggestions_list:
+    st.subheader("🔧 Suggested Improvements")
+    for s in suggestions_list:
+        st.write(f"- {s}")
+
 
 
         # Chart compare standard vs competitor
