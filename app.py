@@ -616,12 +616,11 @@ if st.button("🔎 Compare"):
                 st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
 
         # Generate suggestions and display them
-if suggestions_list:
-    st.subheader("🔧 Suggested Improvements")
-    for s in suggestions_list:
-        st.write(f"- {s}")
-
-
+        suggestions_list = suggestions(competitor_dict)
+        if suggestions_list:
+            st.subheader("🔧 Suggested Improvements")
+            for s in suggestions_list:
+                st.write(f"- {s}")
 
         # Chart compare standard vs competitor
         fig, ax = plt.subplots(figsize=(10, 4))
