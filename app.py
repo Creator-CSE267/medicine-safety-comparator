@@ -400,20 +400,23 @@ with st.sidebar:
     st.sidebar.write("© 2025 MedSafe AI")
 
 
+
 # =========================================================
-# 🧪 TESTING PAGE (uses standard row + delta-aware model)
+# 🧪 TESTING PAGE (REPLACEMENT)
 # =========================================================
 if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
     st.subheader("🔍 Search by UPC or Active Ingredient")
 
     col1, col2 = st.columns(2)
-    upc_input = col1.text_input("Enter UPC")
-    ingr_input = col2.text_input("Enter Active Ingredient")
+    with col1:
+        upc_input = st.text_input("Enter UPC")
+    with col2:
+        ingr_input = st.text_input("Enter Active Ingredient")
 
     selected = None
 
-    # search logic
+    # ------ Search logic ------
     if upc_input:
         match = df[df["UPC"].astype(str).str.strip() == str(upc_input).strip()]
         if not match.empty:
@@ -437,91 +440,56 @@ if menu == "🧪 Testing":
     comp_addr = st.text_area("Address")
     comp_phone = st.text_input("Phone")
 
-    # competitor numeric inputs — default to selected standard values if available
+    # -------------------------
+    # Competitor numeric inputs — START EMPTY (user must fill)
+    # -------------------------
     comp_vals = {}
     for c in num_cols:
-        default_val = float(selected.get(c, 0.0)) if selected is not None and pd.notna(selected.get(c)) else 0.0
-        comp_vals[c] = st.number_input(c, value=default_val)
+        # default value is 0.0 so user must provide values (no auto-populate from standard)
+        comp_vals[c] = st.number_input(f"{c}", value=0.0, format="%.2f")
 
-    def predict_against_standard(selected_standard, competitor_values):
-        if model is None:
-            return "ERROR", None
-        # build record with absolute + delta features
-        rec = {}
-        rec["Active Ingredient"] = competitor_values.get("Active Ingredient", selected_standard.get("Active Ingredient", "Unknown"))
-        rec["Disease/Use Case"] = competitor_values.get("Disease/Use Case", selected_standard.get("Disease/Use Case", "Unknown"))
-        for col in num_cols:
-            val = competitor_values.get(col, selected_standard.get(col, 0))
-            rec[col] = float(val)
-            # delta to standard: competitor - standard median (we computed std_stats at training)
+    # -------------------------
+    # Helper: build competitor DataFrame for model
+    # -------------------------
+    def build_comp_df(active_ing, disease, numeric_dict):
+        rec = {"Active Ingredient": active_ing or "Unknown", "Disease/Use Case": disease or "Unknown"}
+        for cc in num_cols:
             try:
-                std_val = float(std_stats.loc[selected_standard["Active Ingredient"], col])
+                rec[cc] = float(numeric_dict.get(cc, 0.0))
             except Exception:
-                std_val = float(std_stats[col].median())
-            rec["d_" + col] = rec[col] - std_val
-
-        rec_df = pd.DataFrame([rec])
-        # ensure ordering if pipeline expects specific features
-        try:
-            if hasattr(model, "feature_names_in_"):
-                expected = list(model.feature_names_in_)
-                expected = [e for e in expected if e in rec_df.columns]
-                rec_df = rec_df[expected]
-        except Exception:
-            pass
-
-        # predict
-        try:
-            if hasattr(model, "predict_proba"):
-                probs = model.predict_proba(rec_df)[0]
-                # find safe index via label encoder
-                safe_idx = None
-                try:
-                    for i, cls in enumerate(le.classes_):
-                        if str(cls).lower() == "safe":
-                            safe_idx = i
-                            break
-                except Exception:
-                    safe_idx = None
-                prob_safe = probs[safe_idx] if safe_idx is not None and safe_idx < len(probs) else None
-                pred_raw = model.predict(rec_df)[0]
-                try:
-                    label = le.inverse_transform([pred_raw])[0]
-                except Exception:
-                    label = str(pred_raw)
-                return label, prob_safe
-            else:
-                pred_raw = model.predict(rec_df)[0]
-                label = le.inverse_transform([pred_raw])[0]
-                return label, None
-        except Exception:
-            return "ERROR", None
+                rec[cc] = 0.0
+        return pd.DataFrame([rec])
 
     if st.button("🔎 Compare"):
-        if selected is None:
-            st.error("Enter valid UPC or Ingredient first.")
+        if selected is None and (not ingr_input or ingr_input.strip() == ""):
+            st.error("⚠️ Please enter a valid UPC or Active Ingredient first.")
         else:
-            # prepare competitor record (include ingredient override if typed)
-            comp_record = comp_vals.copy()
-            if ingr_input:
-                comp_record["Active Ingredient"] = ingr_input
-            comp_record["Disease/Use Case"] = selected.get("Disease/Use Case", "Unknown")
+            # Use ingredient text (user provided or selected)
+            active_ing = ingr_input if ingr_input else (selected.get("Active Ingredient") if selected is not None else "Unknown")
+            disease = selected.get("Disease/Use Case", "Unknown") if selected is not None else "Unknown"
 
-            res, prob = predict_against_standard(selected, comp_record)
+            competitor_df = build_comp_df(active_ing, disease, comp_vals)
 
-            if res == "ERROR":
-                st.error("Prediction failed.")
+            # Model prediction (wrap in try/except)
+            try:
+                pred = model.predict(competitor_df)[0]
+                result = le.inverse_transform([pred])[0] if 'le' in globals() else str(pred)
+            except Exception as e:
+                st.error("Prediction failed: " + str(e))
+                result = "ERROR"
+
+            # Show result
+            if result == "ERROR":
+                st.error("Prediction failed; check model logs.")
             else:
-                if prob is not None:
-                    st.success(f"Prediction → **{res}** (P_safe={prob:.2f})")
-                else:
-                    st.success(f"Prediction → **{res}**")
+                st.success(f"Prediction → **{result}**")
 
-            # Chart
+            # Chart: compare standard (if available) vs competitor
             fig, ax = plt.subplots(figsize=(10, 4))
             x = np.arange(len(num_cols))
-            std_vals = [float(selected.get(c, 0.0) or 0.0) for c in num_cols]
+            std_vals = [float(selected.get(c, 0.0) or 0.0) for c in num_cols] if selected is not None else [0.0]*len(num_cols)
             comp_vals_list = [float(comp_vals[c] or 0.0) for c in num_cols]
+
             ax.bar(x - 0.3, std_vals, width=0.3, label="Standard")
             ax.bar(x + 0.3, comp_vals_list, width=0.3, label="Competitor")
             ax.set_xticks(x)
@@ -529,34 +497,64 @@ if menu == "🧪 Testing":
             ax.legend()
             st.pyplot(fig)
 
-            # Suggestions if unsafe
-            if isinstance(res, str) and res.lower() == "not safe":
-                st.error("❌ Not Safe")
-                sug = suggestions(comp_vals)
-                if sug:
-                    st.subheader("Improvements")
-                    for s in sug:
-                        st.write("- ", s)
+            # Suggestions: run your safety-rule suggestions against user-entered competitor values
+            suggestions_list = []
+            if isinstance(result, str) and result.lower() == "not safe":
+                st.error("❌ Competitor medicine is NOT SAFE.")
+                # call existing suggestions(...) function (uses SAFETY rules)
+                try:
+                    suggestions_list = suggestions(comp_vals)
+                except Exception:
+                    # fallback to the alternative name if you used suggest_improvements earlier
+                    try:
+                        suggestions_list = suggest_improvements(comp_vals)
+                    except Exception:
+                        suggestions_list = []
 
-            # Log result (MongoDB or fallback)
+                if suggestions_list:
+                    st.subheader("🔧 Suggested Improvements")
+                    for s in suggestions_list:
+                        st.write(f"- {s}")
+                else:
+                    st.info("No suggestions generated — check safety rules or input values.")
+            else:
+                # Optionally show rule-based tips even for safe results — comment/uncomment as desired
+                # tips = suggestions(comp_vals)
+                # if tips:
+                #     st.subheader("⚠️ Minor suggestions (optional):")
+                #     for t in tips:
+                #         st.write(f"- {t}")
+                pass
+
+            # -------------------------
+            # Logging: try Mongo then CSV fallback
+            # -------------------------
             log_doc = {
                 "timestamp": datetime.now().isoformat(),
                 "UPC": upc_input,
-                "Ingredient": ingr_input,
+                "Ingredient": active_ing,
                 "Competitor": comp_name,
-                "Result": res
+                "Result": result
             }
-            try:
-                log_col.insert_one(log_doc)
-            except Exception:
-                # fallback to CSV log
+            logged = False
+            if 'log_col' in globals() and log_col is not None:
+                try:
+                    log_col.insert_one(log_doc)
+                    logged = True
+                    st.info("Logged result to MongoDB.")
+                except Exception:
+                    st.warning("MongoDB logging failed — falling back to CSV.")
+            if not logged:
                 try:
                     lf = "test_logs.csv"
                     pd.DataFrame([log_doc]).to_csv(lf, mode="a", header=not os.path.exists(lf), index=False)
+                    st.info(f"Logged result to CSV: {lf}")
                 except Exception:
-                    pass
+                    st.error("Failed to log result.")
 
-            # PDF report (same layout as before)
+            # -------------------------
+            # PDF Report Generation & Download (includes suggestions if Not Safe)
+            # -------------------------
             try:
                 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
                 from reportlab.lib.styles import getSampleStyleSheet
@@ -569,6 +567,7 @@ if menu == "🧪 Testing":
                 styles = getSampleStyleSheet()
                 elements = []
 
+                # logo
                 if os.path.exists("logo.png"):
                     try:
                         elements.append(RLImage("logo.png", width=100, height=100))
@@ -576,16 +575,19 @@ if menu == "🧪 Testing":
                     except Exception:
                         pass
 
+                # title/date
                 elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
                 elements.append(Spacer(1, 12))
                 elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
+                # standard
                 elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
-                elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
-                elements.append(Paragraph(f"Ingredient: {ingr_input}", styles["Normal"]))
+                elements.append(Paragraph(f"UPC: {selected['UPC'] if selected is not None else 'N/A'}", styles["Normal"]))
+                elements.append(Paragraph(f"Ingredient: {active_ing}", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
+                # competitor info
                 elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
                 elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
                 elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
@@ -593,21 +595,30 @@ if menu == "🧪 Testing":
                 elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
+                # prediction
                 elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-                if isinstance(res, str) and res.lower() == "safe":
-                    elements.append(Paragraph(f"<font color='green'><b>{res}</b></font>", styles["Normal"]))
+                if isinstance(result, str) and result.lower() == "safe":
+                    elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
                 else:
-                    elements.append(Paragraph(f"<font color='red'><b>{res}</b></font>", styles["Normal"]))
+                    elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
                 elements.append(Spacer(1, 12))
 
-                if isinstance(res, str) and res.lower() == "not safe":
+                # suggestions
+                if isinstance(result, str) and result.lower() == "not safe" and suggestions_list:
                     elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
-                    sug = suggestions(comp_vals)
-                    for s in sug:
+                    for s in suggestions_list:
                         elements.append(Paragraph(f"- {s}", styles["Normal"]))
                     elements.append(Spacer(1, 12))
 
-                # attach chart image
+                # criteria comparison table (text) — list numeric values
+                elements.append(Paragraph("<b>Criteria Comparison (Standard vs Competitor)</b>", styles["Heading2"]))
+                for idx, c in enumerate(num_cols):
+                    stdv = std_vals[idx] if selected is not None else "N/A"
+                    compv = comp_vals_list[idx]
+                    elements.append(Paragraph(f"{c}: Standard = {stdv}  |  Competitor = {compv}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                # attach chart
                 chart_buffer = io.BytesIO()
                 fig.savefig(chart_buffer, format="png", bbox_inches="tight")
                 chart_buffer.seek(0)
@@ -618,6 +629,7 @@ if menu == "🧪 Testing":
                 except Exception:
                     pass
 
+                # build & provide download
                 doc.build(elements)
                 buffer.seek(0)
 
@@ -627,8 +639,9 @@ if menu == "🧪 Testing":
                     file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf"
                 )
-            except Exception:
-                st.warning("Failed to generate PDF report.")
+            except Exception as e:
+                st.warning("Failed to generate PDF report: " + str(e))
+
 
 
 # =========================================================
