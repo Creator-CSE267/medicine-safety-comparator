@@ -17,7 +17,9 @@ from pymongo import MongoClient
 from bson import ObjectId
 import certifi
 import os
-
+import joblib
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+import pathlib
 # Login + Theme
 from login import login_router
 from user_database import init_user_db
@@ -136,84 +138,17 @@ role = st.session_state["role"]
 st.title("💊 Medicine Safety Comparator")
 
 # --------------------------
-# Load ML Data From MongoDB (SAFE MODE)
+# ML: Load existing model or train a new one and save
 # --------------------------
-docs = list(med_col.find({}))
-if not docs:
-    st.error("No ML records found in MongoDB 'medicines'.")
-    st.stop()
-
-df = pd.DataFrame(docs)
-
-# Drop Mongo _id
-df = df.drop(columns=["_id"], errors="ignore")
-
-# Required columns for ML
-required_cols = [
-    "UPC", "Active Ingredient", "Disease/Use Case",
-    "Days Until Expiry", "Storage Temperature (C)",
-    "Dissolution Rate (%)", "Disintegration Time (minutes)",
-    "Impurity Level (%)", "Assay Purity (%)",
-    "Warning Labels Present", "Safe/Not Safe"
-]
-
-# Create missing columns
-for c in required_cols:
-    if c not in df.columns:
-        df[c] = None
-
-# Drop rows missing essential text fields
-df = df.dropna(subset=["Active Ingredient", "Disease/Use Case", "Safe/Not Safe"], how="any")
-
-# Reset index
-df = df.reset_index(drop=True)
-
-# Text cleanup
-df["UPC"] = df["UPC"].astype(str).str.strip()
-df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown").astype(str)
-df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown").astype(str)
-df["Safe/Not Safe"] = df["Safe/Not Safe"].fillna("Safe").astype(str)
-
-# Numeric fields
-num_cols = [
-    "Days Until Expiry",
-    "Storage Temperature (C)",
-    "Dissolution Rate (%)",
-    "Disintegration Time (minutes)",
-    "Impurity Level (%)",
-    "Assay Purity (%)",
-    "Warning Labels Present"
-]
-
-# Convert ALL numeric fields, replace bad values with 0
-for col in num_cols:
-    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
-# Final X/Y
-X = df[["Active Ingredient", "Disease/Use Case"] + num_cols]
-y = df["Safe/Not Safe"]
-
-# Encode target
-le = LabelEncoder()
-y = le.fit_transform(y)
-
-# Ensure at least 2 classes
-if len(np.unique(y)) < 2:
-    dummy = df.iloc[0].copy()
-    dummy["Active Ingredient"] = "DummyUnsafe"
-    dummy["Safe/Not Safe"] = "Not Safe"
-    for col in num_cols:
-        dummy[col] = 0
-    df = pd.concat([df, pd.DataFrame([dummy])], ignore_index=True)
-    y = le.fit_transform(df["Safe/Not Safe"])
-    X = df[["Active Ingredient", "Disease/Use Case"] + num_cols]
 
 
+MODEL_DIR = pathlib.Path("models")
+MODEL_DIR.mkdir(exist_ok=True)
+MODEL_PATH = MODEL_DIR / "medicine_pipeline.joblib"
+LABEL_PATH = MODEL_DIR / "label_encoder.joblib"
 
-# --------------------------
-# Train ML Model
-# --------------------------
-def train_model(X, y):
+def build_pipeline(num_cols):
+    """Construct the scikit-learn pipeline (same as training)."""
     numeric_transformer = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
@@ -227,46 +162,96 @@ def train_model(X, y):
 
     pipe = Pipeline([
         ("preprocess", pre),
-        ("model", LogisticRegression(max_iter=1000)),
+        ("model", LogisticRegression(max_iter=2000, random_state=42)),
     ])
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-
-    pipe.fit(X_train, y_train)
     return pipe
 
-model = train_model(X, y)
+def train_and_save(X, y, num_cols, model_path=MODEL_PATH, label_path=LABEL_PATH):
+    """
+    Train pipeline on X/y, evaluate on holdout, attach feature names,
+    and save pipeline + LabelEncoder to disk.
+    """
+    # Build pipeline
+    pipe = build_pipeline(num_cols)
 
-# --------------------------
-# Safety Rules
-# --------------------------
-SAFETY = {
-    "Days Until Expiry": {"min": 30},
-    "Storage Temperature (C)": {"range": (15, 30)},
-    "Dissolution Rate (%)": {"min": 80},
-    "Disintegration Time (minutes)": {"max": 30},
-    "Impurity Level (%)": {"max": 2},
-    "Assay Purity (%)": {"min": 90},
-    "Warning Labels Present": {"min": 1},
-}
+    # Train/test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y if len(np.unique(y))>1 else None)
 
-def suggestions(vals):
-    out = []
-    for col, val in vals.items():
-        rule = SAFETY.get(col)
-        if not rule:
-            continue
-        if "min" in rule and val < rule["min"]:
-            out.append(f"Increase *{col}* (min {rule['min']}).")
-        if "max" in rule and val > rule["max"]:
-            out.append(f"Reduce *{col}* (max {rule['max']}).")
-        if "range" in rule:
-            lo, hi = rule["range"]
-            if not (lo <= val <= hi):
-                out.append(f"Keep *{col}* within {lo}-{hi}.")
-    return out
+    # Fit
+    pipe.fit(X_train, y_train)
+
+    # Predictions and metrics
+    y_pred = pipe.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    clf_report = classification_report(y_test, y_pred, zero_division=0, output_dict=False)
+    cm = confusion_matrix(y_test, y_pred)
+
+    # Persist label encoder (le) and pipeline
+    try:
+        joblib.dump(pipe, model_path)
+    except Exception:
+        # if dumping fails, just print to logs (app continues)
+        import traceback; traceback.print_exc()
+
+    # Save label encoder as well (we assume 'le' exists in scope)
+    try:
+        joblib.dump(le, label_path)
+    except Exception:
+        import traceback; traceback.print_exc()
+
+    # Attach feature names for downstream ordering (useful for prediction-time reordering)
+    try:
+        feature_names = ["Active Ingredient", "Disease/Use Case"] + num_cols
+        # Scikit-learn expects numpy array for feature_names_in_
+        pipe.feature_names_in_ = np.array(feature_names, dtype=object)
+    except Exception:
+        pass
+
+    # Return pipeline and metrics
+    return pipe, {"accuracy": acc, "report": clf_report, "confusion_matrix": cm}
+
+def load_model_if_exists(model_path=MODEL_PATH, label_path=LABEL_PATH):
+    """Load saved pipeline and label encoder if available."""
+    if model_path.exists() and label_path.exists():
+        try:
+            loaded_pipe = joblib.load(model_path)
+            loaded_le = joblib.load(label_path)
+            # ensure feature_names_in_ exists
+            if not hasattr(loaded_pipe, "feature_names_in_"):
+                feature_names = ["Active Ingredient", "Disease/Use Case"] + num_cols
+                loaded_pipe.feature_names_in_ = np.array(feature_names, dtype=object)
+            return loaded_pipe, loaded_le
+        except Exception:
+            import traceback; traceback.print_exc()
+            return None, None
+    return None, None
+
+# Attempt to load existing model
+model_loaded, le_loaded = load_model_if_exists()
+
+if model_loaded is not None and le_loaded is not None:
+    model = model_loaded
+    le = le_loaded
+    st.success("Loaded saved ML pipeline and label encoder from disk.")
+else:
+    # Train new model and save it
+    with st.spinner("Training ML model (this may take a few seconds)..."):
+        try:
+            model, metrics = train_and_save(X, y, num_cols)
+            st.success(f"Model trained and saved ({MODEL_PATH}). Accuracy (holdout): {metrics['accuracy']:.3f}")
+            st.text("Classification report (holdout):")
+            st.text(metrics["report"])
+        except Exception as e:
+            st.error("Failed to train model.")
+            import traceback; traceback.print_exc()
+            # If training fails, try to build a minimal fallback model to keep the app alive
+            model = build_pipeline(num_cols)
+            # Fit on full data if possible (best-effort)
+            try:
+                model.fit(X, y)
+                st.warning("Trained fallback model on full data.")
+            except Exception:
+                st.error("Could not fit fallback model. Prediction features may not work.")
 
 # --------------------------
 # Sidebar Navigation
