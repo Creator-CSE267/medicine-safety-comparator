@@ -744,185 +744,331 @@ if menu == "🧪 Testing":
 
 
 # =========================================================
-# 📊 PROFESSIONAL DASHBOARD (FULLY ENHANCED)
+# 📊 PROFESSIONAL DASHBOARD (Fixed + New Features: Alerts, Ranking, Forecast, Ingredient Profile)
+# Replace your existing `elif menu == "📊 Dashboard":` block with this.
 # =========================================================
 elif menu == "📊 Dashboard":
     st.header("📊 Test Results Dashboard")
     st.markdown(
-        "<div style='color:#333; font-size:16px;'>A complete view of all medicine safety tests with "
-        "filters, trends, analysis, and exports.</div>", 
+        "<div style='color:#222; font-size:15px;'>Overview of medicine safety comparisons — "
+        "KPIs, trends, alerts for unsafe results, competitor ranking, forecasting, and per-ingredient analysis.</div>",
         unsafe_allow_html=True
     )
     st.write("")
 
-    # 1) LOAD LOGS SAFELY
+    # ---------- 1) LOAD LOGS SAFELY ----------
     try:
         raw_logs = list(log_col.find({}).sort([("_id", -1)]))
     except Exception as e:
         raw_logs = []
-        st.error("❌ Unable to load logs from MongoDB.")
+        st.error("❌ Unable to load logs from MongoDB: " + str(e))
         st.stop()
 
     if not raw_logs:
-        st.info("No logs available yet. Run some tests first.")
+        st.info("No logs found. Run tests from the Testing page to populate logs.")
         st.stop()
 
     logs_df = pd.DataFrame(raw_logs)
 
-    # ---- Normalize critical fields ----
-    logs_df["timestamp"] = pd.to_datetime(logs_df.get("timestamp"), errors="coerce")
-    logs_df["UPC"] = logs_df.get("UPC", "")
-    logs_df["Ingredient"] = logs_df.get("Ingredient", "")
-    logs_df["Competitor"] = logs_df.get("Competitor", "")
-    logs_df["Result"] = logs_df.get("Result", "Unknown")
+    # ---------- 2) NORMALIZE FIELDS (robust) ----------
+    # Ensure timestamp
+    logs_df["timestamp"] = pd.to_datetime(logs_df.get("timestamp", pd.NaT), errors="coerce")
+    # Normalize text fields (use get fallback)
+    logs_df["UPC"] = logs_df.get("UPC", logs_df.get("upc", "")).astype(str)
+    logs_df["Ingredient"] = logs_df.get("Ingredient", logs_df.get("ingredient", "")).astype(str)
+    logs_df["Competitor"] = logs_df.get("Competitor", logs_df.get("competitor", "")).astype(str)
+    logs_df["Result"] = logs_df.get("Result", logs_df.get("result", "Unknown")).astype(str)
 
-    # suggestions normalization
-    def _norm_sugg(v):
-        if isinstance(v, list):
-            return " | ".join(v)
-        return str(v) if v not in [None, "nan"] else ""
-    logs_df["Suggestions"] = logs_df.get("suggestions", "").apply(_norm_sugg)
+    # Normalize suggestions safely (fixes previous AttributeError)
+    def _norm_sugg_cell(cell):
+        if cell is None:
+            return ""
+        if isinstance(cell, (list, tuple)):
+            return " | ".join(map(str, cell))
+        if isinstance(cell, dict):
+            # flatten dict values
+            return " | ".join(f"{k}: {v}" for k, v in cell.items())
+        # any other scalar
+        return str(cell)
 
-    # ============================
-    # 2) KPI CARDS
-    # ============================
+    if "suggestions" in logs_df.columns:
+        logs_df["Suggestions"] = logs_df["suggestions"].apply(_norm_sugg_cell)
+    else:
+        logs_df["Suggestions"] = ""
+
+    # Normalize details if present
+    if "details" not in logs_df.columns:
+        logs_df["details"] = [[] for _ in range(len(logs_df))]
+    else:
+        # ensure lists
+        def _norm_details(d):
+            if d is None:
+                return []
+            if isinstance(d, list):
+                return d
+            if isinstance(d, str):
+                # try split by '|' or newline if accidentally stored as string
+                if " | " in d:
+                    return [x.strip() for x in d.split(" | ") if x.strip()]
+                return [d]
+            if isinstance(d, dict):
+                return [f"{k}: {v}" for k, v in d.items()]
+            return [str(d)]
+        logs_df["details"] = logs_df["details"].apply(_norm_details)
+
+    # ---------- 3) KPIs ----------
     total_tests = len(logs_df)
     safe_count = logs_df["Result"].str.lower().eq("safe").sum()
-    fail_count = logs_df["Result"].str.lower().eq("not safe").sum()
+    not_safe_count = logs_df["Result"].str.lower().eq("not safe").sum()
+    unknown_count = total_tests - safe_count - not_safe_count
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Tests", f"{total_tests}")
-    c2.metric("Safe", f"{safe_count}", delta=f"{(safe_count/total_tests)*100:.1f}%")
-    c3.metric("Not Safe", f"{fail_count}", delta=f"{(fail_count/total_tests)*100:.1f}%")
+    k1, k2, k3, k4 = st.columns([1.2, 0.9, 0.9, 0.9])
+    k1.metric("Total Tests", f"{total_tests:,}")
+    k2.metric("Safe", f"{int(safe_count):,}", delta=f"{(safe_count/total_tests*100):.1f}%")
+    k3.metric("Not Safe", f"{int(not_safe_count):,}", delta=f"{(not_safe_count/total_tests*100):.1f}%")
+    k4.metric("Unknown", f"{int(unknown_count):,}")
 
+    st.markdown("---")
 
-    # ============================
-    # 3) FILTER BAR
-    # ============================
-    with st.expander("🔎 Filters", expanded=False):
-        f1, f2, f3 = st.columns(3)
+    # ---------- 4) FILTER BAR ----------
+    with st.expander("🔎 Filters (date / result / search)", expanded=False):
+        cf1, cf2, cf3 = st.columns(3)
+        min_ts = logs_df["timestamp"].min()
+        max_ts = logs_df["timestamp"].max()
+        if pd.isna(min_ts):
+            min_ts = datetime.now()
+        if pd.isna(max_ts):
+            max_ts = datetime.now()
 
-        # Date range
-        min_ts = logs_df["timestamp"].min().date() if logs_df["timestamp"].notna().any() else datetime.now().date()
-        max_ts = logs_df["timestamp"].max().date() if logs_df["timestamp"].notna().any() else datetime.now().date()
+        date_from = cf1.date_input("From", min_ts.date())
+        date_to = cf1.date_input("To", max_ts.date())
+        result_filter = cf2.selectbox("Result", ["All", "Safe", "Not Safe", "Unknown"])
+        search_txt = cf3.text_input("Search (UPC / Ingredient / Competitor)")
 
-        date_from = f1.date_input("From", min_ts)
-        date_to = f1.date_input("To", max_ts)
-
-        # Result filter
-        result_filter = f2.selectbox("Result", ["All", "Safe", "Not Safe"])
-
-        # Free search (UPC / ingredient / competitor)
-        search_text = f3.text_input("Search (UPC / Ingredient / Competitor)")
-
-    # Apply filters
+    # Apply filters to a working copy
     df_filtered = logs_df.copy()
+    try:
+        df_filtered = df_filtered[
+            (df_filtered["timestamp"].dt.date >= date_from) &
+            (df_filtered["timestamp"].dt.date <= date_to)
+        ]
+    except Exception:
+        # timestamps may be NaT — ignore date filtering in that case
+        pass
 
-    # Date filter
-    df_filtered = df_filtered[
-        (df_filtered["timestamp"].dt.date >= date_from) &
-        (df_filtered["timestamp"].dt.date <= date_to)
-    ]
-
-    # Result filter
     if result_filter != "All":
         df_filtered = df_filtered[df_filtered["Result"].str.lower() == result_filter.lower()]
 
-    # Free search
-    if search_text.strip():
-        q = search_text.lower().strip()
+    if search_txt and search_txt.strip():
+        q = search_txt.strip().lower()
         df_filtered = df_filtered[
-            df_filtered["UPC"].astype(str).str.lower().str.contains(q) |
-            df_filtered["Ingredient"].astype(str).str.lower().str.contains(q) |
-            df_filtered["Competitor"].astype(str).str.lower().str.contains(q)
+            df_filtered["UPC"].str.lower().str.contains(q, na=False) |
+            df_filtered["Ingredient"].str.lower().str.contains(q, na=False) |
+            df_filtered["Competitor"].str.lower().str.contains(q, na=False)
         ]
 
-    # ============================
-    # 4) TREND LINE (DAILY TESTS)
-    # ============================
-    st.markdown("### 📈 Testing Trend")
+    st.markdown("---")
+
+    # ---------- 5) TREND + SIMPLE FORECAST ----------
+    st.markdown("### 📈 Tests Trend & 7-day Forecast")
     try:
-        trend = df_filtered.groupby(df_filtered["timestamp"].dt.date).size()
-        fig = px.line(x=trend.index, y=trend.values, labels={"x": "Date", "y": "Tests"})
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig, use_container_width=True)
-    except:
-        st.info("Not enough data for trend chart.")
+        # counts per day
+        daily = df_filtered.dropna(subset=["timestamp"]).groupby(df_filtered["timestamp"].dt.date).size().rename("count")
+        if daily.empty:
+            st.info("Not enough dated data for trend.")
+        else:
+            fig_trend = px.line(x=daily.index, y=daily.values, labels={"x":"Date","y":"Tests"}, title="Tests per day")
+            st.plotly_chart(fig_trend, use_container_width=True)
 
-    # ============================
-    # 5) PER-INGREDIENT BAR CHART
-    # ============================
-    st.markdown("### 🔬 Tests per Ingredient")
+            # Simple linear forecast (fit line to daily counts)
+            try:
+                # numeric x
+                x = np.arange(len(daily))
+                y = np.array(daily.values)
+                if len(x) >= 3:
+                    # fit degree-1 poly
+                    p = np.polyfit(x, y, 1)
+                    next_x = np.arange(len(daily), len(daily)+7)
+                    pred = np.polyval(p, next_x).clip(min=0).round().astype(int)
+
+                    future_dates = [ (pd.to_datetime(daily.index[-1]) + pd.Timedelta(days=i)).date() for i in range(1,8) ]
+                    forecast_df = pd.DataFrame({"date": future_dates, "predicted_tests": pred})
+                    st.markdown("**7-day simple forecast (linear trend)**")
+                    st.table(forecast_df)
+                else:
+                    st.info("Need at least 3 days of data for a basic forecast.")
+            except Exception:
+                st.info("Forecasting failed (insufficient data).")
+    except Exception:
+        st.info("Trend chart unavailable.")
+
+    st.markdown("---")
+
+    # ---------- 6) UNSAFE ALERTS PANEL (Feature 2) ----------
+    st.markdown("### 🚨 Recent Unsafe Alerts")
     try:
-        by_ing = df_filtered.groupby("Ingredient").size().reset_index(name="Tests")
-        fig2 = px.bar(by_ing, x="Ingredient", y="Tests")
-        fig2.update_layout(margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig2, use_container_width=True)
-    except:
-        st.info("Not enough data for ingredient analysis.")
+        recent_unsafe = df_filtered[df_filtered["Result"].str.lower() == "not safe"].sort_values(by="timestamp", ascending=False).head(10)
+        if recent_unsafe.empty:
+            st.info("No recent unsafe cases in the selected filter range.")
+        else:
+            for idx, r in recent_unsafe.iterrows():
+                with st.container():
+                    row_time = r.get("timestamp")
+                    if pd.isna(row_time):
+                        row_time_str = "Unknown date"
+                    else:
+                        row_time_str = pd.to_datetime(row_time).strftime("%Y-%m-%d %H:%M:%S")
+                    st.markdown(f"**{row_time_str}** — **{r.get('Ingredient','')}** — {r.get('Competitor','')}")
+                    # show the failed criteria (parse details)
+                    failed = []
+                    for d in r.get("details", []):
+                        if isinstance(d, str) and "FAIL" in d.upper():
+                            failed.append(d)
+                    if failed:
+                        for fline in failed:
+                            st.markdown(f"<div style='color:#a80000; font-weight:600'>{fline}</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<div style='color:#a80000; font-weight:600'>No per-criterion FAIL lines found in log.</div>", unsafe_allow_html=True)
+                    # show suggestions (black)
+                    sugg = r.get("Suggestions", "")
+                    if sugg:
+                        st.markdown(f"<div style='color:#111111; margin-top:6px;'>Suggested Improvements: {sugg}</div>", unsafe_allow_html=True)
+                    st.markdown("---")
+    except Exception:
+        st.info("Unable to build Unsafe Alerts.")
 
-    # ============================
-    # 6) PAGINATED TABLE
-    # ============================
-    st.markdown("### 📋 Recent Results")
-
-    page_size = 20
-    total_pages = (len(df_filtered) // page_size) + 1
-    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1)
-
-    start = (page - 1) * page_size
-    end = start + page_size
-
-    df_page = df_filtered.iloc[start:end].copy()
-    df_page_disp = df_page[["timestamp", "UPC", "Ingredient", "Competitor", "Result", "Suggestions"]]
-    df_page_disp["timestamp"] = df_page_disp["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
-
-    st.dataframe(df_page_disp, use_container_width=True)
-
-    # ============================
-    # 7) DETAILED EXPANDERS PER TEST
-    # ============================
-    st.markdown("### 🧾 Inspect Each Test")
-    for idx, row in df_page.iterrows():
-        with st.expander(f"{row['timestamp']} | {row['Ingredient']} | {row['Result']}"):
-            st.write("**UPC:**", row.get("UPC", ""))
-            st.write("**Ingredient:**", row.get("Ingredient", ""))
-            st.write("**Competitor:**", row.get("Competitor", ""))
-            st.write("**Result:**", row.get("Result", ""))
-            st.write("**Suggestions:**", row.get("Suggestions", ""))
-            if isinstance(row.get("details"), list):
-                st.write("**Per-Criterion Details:**")
-                for d in row["details"]:
-                    st.markdown(f"- {d}")
-
-            st.json(row.to_dict())
-
-    # ============================
-    # 8) DOWNLOAD BUTTONS
-    # ============================
-    cA, cB = st.columns(2)
-
+    # ---------- 7) COMPETITOR RANKING (Feature 3) ----------
+    st.markdown("### 🏆 Competitor Ranking (by tests & safety rate)")
     try:
-        csv_view = df_page_disp.to_csv(index=False).encode("utf-8")
-        cA.download_button("⬇️ Download Visible Logs", csv_view, "visible_logs.csv", "text/csv")
-    except:
-        pass
+        comp_grp = df_filtered.groupby("Competitor").agg(
+            tests=("Competitor", "count"),
+            safe_count=("Result", lambda s: s.str.lower().eq("safe").sum()),
+        ).reset_index()
+        if not comp_grp.empty:
+            comp_grp["safe_rate"] = (comp_grp["safe_count"] / comp_grp["tests"] * 100).round(1)
+            comp_rank = comp_grp.sort_values(["safe_rate", "tests"], ascending=[False, False]).head(20)
+            st.dataframe(comp_rank.rename(columns={"tests":"Tests","safe_count":"Safe Count","safe_rate":"Safety (%)"}), use_container_width=True)
 
+            # small bar chart of top 10 by safety rate (only competitors with >1 test)
+            chart_df = comp_rank[comp_rank["tests"]>0].head(10)
+            fig_comp = px.bar(chart_df, x="Competitor", y="safe_rate", labels={"safe_rate":"Safety (%)"}, title="Top Competitors by Safety Rate")
+            st.plotly_chart(fig_comp, use_container_width=True)
+        else:
+            st.info("Not enough competitor data.")
+    except Exception:
+        st.info("Competitor ranking unavailable.")
+
+    st.markdown("---")
+
+    # ---------- 8) INGREDIENT PROFILE (Feature 5) ----------
+    st.markdown("### 🔬 Ingredient Profile")
     try:
-        full_csv = logs_df.to_csv(index=False).encode("utf-8")
-        cB.download_button("⬇️ Download ALL Logs", full_csv, "all_logs.csv", "text/csv")
-    except:
-        pass
+        ingredients = sorted(logs_df["Ingredient"].dropna().unique().tolist())
+        sel_ing = st.selectbox("Select ingredient", options=["(all)"] + ingredients, index=0)
+        if sel_ing == "(all)":
+            ing_df = logs_df.copy()
+        else:
+            ing_df = logs_df[logs_df["Ingredient"] == sel_ing].copy()
 
-    # ============================
-    # 9) ADMIN: CLEAR LOGS
-    # ============================
-    if role.lower() == "admin":
-        with st.expander("⚠️ Admin Actions"):
-            if st.button("Delete ALL Logs"):
-                log_col.delete_many({})
-                st.success("All logs deleted.")
-                st.rerun()
+        st.write(f"Showing {len(ing_df)} tests for ingredient: **{sel_ing}**")
+
+        # Pass/fail by criterion: parse 'details' lines that contain 'PASS'/'FAIL'
+        # Build counts per criterion
+        criterion_counts = {}
+        for details in ing_df["details"].tolist():
+            for d in details:
+                if not isinstance(d, str):
+                    continue
+                # attempt to parse "Criterion: value ... → PASS" or "→ FAIL"
+                upper = d.upper()
+                if "→" in d:
+                    try:
+                        left, right = d.split("→", 1)
+                        outcome = right.strip().upper()
+                        # criterion name is left before colon
+                        crit = left.split(":", 1)[0].strip()
+                    except Exception:
+                        crit = d
+                        outcome = "UNKNOWN"
+                else:
+                    # fallback detection
+                    crit = d.split(":",1)[0].strip()
+                    outcome = "PASS" if "PASS" in upper else ("FAIL" if "FAIL" in upper else "UNKNOWN")
+                if crit not in criterion_counts:
+                    criterion_counts[crit] = {"pass":0, "fail":0, "total":0}
+                if "PASS" in outcome:
+                    criterion_counts[crit]["pass"] += 1
+                elif "FAIL" in outcome:
+                    criterion_counts[crit]["fail"] += 1
+                else:
+                    # unknown — count as total only
+                    pass
+                criterion_counts[crit]["total"] += 1
+
+        if criterion_counts:
+            crit_df = pd.DataFrame([
+                {"Criterion": k, "Pass": v["pass"], "Fail": v["fail"], "Total": v["total"],
+                 "PassRate": (v["pass"]/v["total"]*100 if v["total"]>0 else 0)}
+                for k, v in criterion_counts.items()
+            ]).sort_values("PassRate", ascending=False)
+
+            st.dataframe(crit_df, use_container_width=True)
+
+            # bar chart of pass rate
+            fig_ing = px.bar(crit_df, x="Criterion", y="PassRate", labels={"PassRate":"Pass Rate (%)"}, title="Per-criterion pass rate")
+            st.plotly_chart(fig_ing, use_container_width=True)
+        else:
+            st.info("No per-criterion detail lines found for this ingredient.")
+
+    except Exception:
+        st.info("Ingredient profile unavailable.")
+
+    st.markdown("---")
+
+    # ---------- 9) PAGINATED TABLE + DOWNLOADS ----------
+    st.markdown("### 📋 Recent Results (paginated)")
+    try:
+        page_size = st.selectbox("Rows per page", [10, 20, 50], index=1)
+        total_pages = max(1, (len(df_filtered) + page_size - 1) // page_size)
+        page = st.number_input("Page", min_value=1, max_value=total_pages, value=1)
+        start = (page-1) * page_size
+        end = start + page_size
+        df_page = df_filtered.iloc[start:end].copy()
+
+        display_cols = ["timestamp", "UPC", "Ingredient", "Competitor", "Result", "Suggestions"]
+        display_cols = [c for c in display_cols if c in df_page.columns]
+        if "timestamp" in df_page.columns:
+            df_page["timestamp"] = df_page["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        st.dataframe(df_page[display_cols].rename(columns={"timestamp":"Date","Suggestions":"Suggestions"}), use_container_width=True)
+
+        c1, c2 = st.columns(2)
+        try:
+            csv_page = df_page[display_cols].to_csv(index=False).encode("utf-8")
+            c1.download_button("⬇️ Download visible page (CSV)", csv_page, file_name="visible_logs.csv", mime="text/csv")
+        except Exception:
+            pass
+        try:
+            full_csv = logs_df.to_csv(index=False).encode("utf-8")
+            c2.download_button("⬇️ Download ALL logs (CSV)", full_csv, file_name="all_logs.csv", mime="text/csv")
+        except Exception:
+            pass
+    except Exception:
+        st.info("Unable to render paginated table.")
+
+    # ---------- 10) ADMIN: CLEAR LOGS ----------
+    if (role or "").strip().lower() == "admin":
+        with st.expander("⚠️ Admin Actions", expanded=False):
+            if st.button("Delete ALL Logs (ADMIN ONLY)"):
+                try:
+                    log_col.delete_many({})
+                    st.success("All logs deleted. Reloading...")
+                    st.experimental_rerun()
+                except Exception as e:
+                    st.error("Failed to clear logs: " + str(e))
+
+# =========================================================
+# End of Dashboard replacement
+# =========================================================
 
 
 
