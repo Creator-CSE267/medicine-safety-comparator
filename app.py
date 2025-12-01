@@ -75,144 +75,7 @@ def get_db():
 
     return client[dbname]
 
-def migrate_medicines_csv():
-    """Simple migration: medicine_dataset.csv → MongoDB 'medicines' collection."""
-    db_local = get_db()                     # ALWAYS get database safely
-    med_coll = db_local["medicines"]        # target collection
 
-    csv_path = "medicine_dataset.csv"
-    if not os.path.exists(csv_path):
-        st.error("CSV file not found: medicine_dataset.csv")
-        return
-
-    df = pd.read_csv(csv_path).fillna("")
-
-    inserted = updated = 0
-
-    for _, row in df.iterrows():
-        doc = {
-            "UPC": str(row.get("UPC", "")).strip(),
-            "Active Ingredient": str(row.get("Active Ingredient", "")).strip(),
-            "Disease/Use Case": str(row.get("Disease/Use Case", "")).strip(),
-            "Days Until Expiry": row.get("Days Until Expiry", None),
-            "Storage Temperature (C)": row.get("Storage Temperature (C)", None),
-            "Dissolution Rate (%)": row.get("Dissolution Rate (%)", None),
-            "Disintegration Time (minutes)": row.get("Disintegration Time (minutes)", None),
-            "Impurity Level (%)": row.get("Impurity Level (%)", None),
-            "Assay Purity (%)": row.get("Assay Purity (%)", None),
-            "Warning Labels Present": row.get("Warning Labels Present", None),
-            "Manufacturer": str(row.get("Manufacturer", "")).strip(),
-            "Batch": str(row.get("Batch", "")).strip(),
-            "Stock": row.get("Stock", None),
-            "Expiry": str(row.get("Expiry", "")).strip(),
-            "Safe/Not Safe": str(row.get("Safe/Not Safe", "Safe")).strip()
-        }
-
-        key = {"UPC": doc["UPC"], "Batch": doc["Batch"]}
-
-        existing = med_coll.find_one(key)
-
-        if existing:
-            med_coll.update_one({"_id": existing["_id"]}, {"$set": doc})
-            updated += 1
-        else:
-            med_coll.insert_one(doc)
-            inserted += 1
-
-    st.success(f"Migration completed → Inserted: {inserted}, Updated: {updated}")
-
-# ---------------------------
-# SAFE ONE-CLICK CSV → Mongo MIGRATION
-# Paste this anywhere after your get_db() function (but it's safe to paste below the db = get_db() lines too)
-# ---------------------------
-
-def migrate_csv_to_mongo_safe():
-    """
-    Robust migration that obtains DB/collections inside the function so it never
-    fails with NameError if called earlier in file execution.
-    """
-    # get DB & collections (works whether db globals exist or not)
-    try:
-        db_local = get_db()
-    except Exception:
-        # fallback: if get_db is not available, try to read globals
-        db_local = globals().get("db")
-        if db_local is None:
-            raise RuntimeError("Database not available (get_db failed and global db is not set).")
-
-    coll = db_local["inventory"]
-    cons_coll = db_local["consumables"]
-
-    # ---------- migrate inventory.csv ----------
-    inv_path = "inventory.csv"
-    if os.path.exists(inv_path):
-        df = pd.read_csv(inv_path)
-        for _, r in df.iterrows():
-            doc = {
-                "UPC": str(r.get("UPC", "")).strip(),
-                "Ingredient": str(r.get("Ingredient", r.get("Active Ingredient", ""))).strip(),
-                "Manufacturer": str(r.get("Manufacturer", "")).strip(),
-                "Batch": str(r.get("Batch", r.get("Batch Number", ""))).strip(),
-                "Stock": int(r.get("Stock", r.get("Quantity", 0)) or 0),
-                "Expiry": str(r.get("Expiry", "")) if pd.notnull(r.get("Expiry", None)) else None
-            }
-            # upsert by UPC+Batch
-            key = {"UPC": doc["UPC"], "Batch": doc["Batch"]}
-            if doc["UPC"] == "" and doc["Batch"] == "":
-                # if both empty, insert as new doc (avoid overwriting)
-                coll.insert_one(doc)
-            else:
-                existing = coll.find_one(key)
-                if existing:
-                    coll.update_one({"_id": existing["_id"]}, {"$set": doc})
-                else:
-                    coll.insert_one(doc)
-
-    # ---------- migrate consumables_dataset.csv ----------
-    cons_path = "consumables_dataset.csv"
-    if os.path.exists(cons_path):
-        dfc = pd.read_csv(cons_path)
-        for _, r in dfc.iterrows():
-            doc = {
-                "Item Name": str(r.get("Item Name", "")).strip(),
-                "Category": str(r.get("Category", "")).strip(),
-                "Material Type": str(r.get("Material Type", "")).strip(),
-                "Sterility Level": str(r.get("Sterility Level", "")).strip(),
-                "Expiry Period (Months)": int(r.get("Expiry Period (Months)", 0) or 0),
-                "Storage Temperature (C)": r.get("Storage Temperature (C)", None),
-                "Quantity in Stock": int(r.get("Quantity in Stock", r.get("Quantity", 0)) or 0),
-                "Usage Type": str(r.get("Usage Type", "")).strip(),
-                "Certification Standard": str(r.get("Certification Standard", "")).strip(),
-                "UPC": str(r.get("UPC", "")).strip(),
-                "Safe/Not Safe": str(r.get("Safe/Not Safe", "Safe")).strip()
-            }
-            key = {"UPC": doc["UPC"]} if doc["UPC"] else None
-            if key:
-                existing = cons_coll.find_one(key)
-            else:
-                existing = None
-
-            if existing:
-                cons_coll.update_one({"_id": existing["_id"]}, {"$set": doc})
-            else:
-                cons_coll.insert_one(doc)
-
-    return True
-
-
-# BUTTON (paste this where you want the button — sidebar recommended)
-if st.sidebar.button("📤 MIGRATE ALL CSV → MONGO (safe)"):
-    with st.spinner("Migrating CSV data to MongoDB..."):
-        try:
-            migrate_csv_to_mongo_safe()
-            st.success("✅ Migration complete! Refresh the app.")
-        except Exception as e:
-            st.error(f"Migration failed: {e}")
-            raise
-#migration testing db
-with st.sidebar.expander("📥 Migrate medicine_dataset.csv → MongoDB"):
-    if st.button("Run Medicine Migration"):
-        migrate_medicines_csv()
 
 
 db = get_db()
@@ -374,13 +237,7 @@ show_logo("logo.png")
 
 st.title("💊 Medicine Safety Comparator")
 
-# ===============================
-# File Paths (kept for compatibility but CSVs are not required now)
-# ===============================
-MEDICINE_FILE = "medicine_dataset.csv"
-INVENTORY_FILE = "inventory.csv"
-CONSUMABLES_FILE = "consumables_dataset.csv"
-LOG_FILE = "usage_log.csv"  # legacy name (we now use logs_col)
+
 
 # ===============================
 # DB helper functions (Inventory / Consumables / Logs)
@@ -508,37 +365,62 @@ def clear_logs_in_db():
 
 
 # ===============================
-# Load Medicine Dataset (local file for ML model)
+# Load Medicine Dataset (from MongoDB, NOT CSV)
 # ===============================
-if not os.path.exists(MEDICINE_FILE):
-    st.error(f"Required dataset '{MEDICINE_FILE}' not found in repository.")
+med_coll = db["medicines"]
+docs = list(med_coll.find({}))
+
+# If no data → stop immediately
+if not docs:
+    st.error("❌ No records found in MongoDB 'medicines' collection. Add data first.")
     st.stop()
 
-df = pd.read_csv(MEDICINE_FILE, dtype={"UPC": str})
-df["UPC"] = df["UPC"].apply(lambda x: str(x).split(".")[0].strip())
+# Convert to DataFrame
+df = pd.DataFrame(docs)
 
+# Drop MongoDB _id
+if "_id" in df.columns:
+    df.drop(columns=["_id"], inplace=True)
+
+# Ensure required columns exist
+required_cols = [
+    "UPC", "Active Ingredient", "Disease/Use Case",
+    "Days Until Expiry", "Storage Temperature (C)",
+    "Dissolution Rate (%)", "Disintegration Time (minutes)",
+    "Impurity Level (%)", "Assay Purity (%)",
+    "Warning Labels Present", "Safe/Not Safe"
+]
+
+for col in required_cols:
+    if col not in df.columns:
+        df[col] = None
+
+# Clean values
+df["UPC"] = df["UPC"].astype(str).str.strip()
 df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
-if "Disease/Use Case" not in df.columns:
-    df["Disease/Use Case"] = "Unknown"
-else:
-    df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
+df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
+df["Safe/Not Safe"] = df["Safe/Not Safe"].fillna("Safe")
 
-if "Safe/Not Safe" not in df.columns:
-    df["Safe/Not Safe"] = "Safe"
+# Convert Yes/No → 1/0 for ML
+if df["Warning Labels Present"].dtype == "object":
+    df["Warning Labels Present"] = (
+        df["Warning Labels Present"].map({"Yes": 1, "No": 0}).fillna(0)
+    )
 
+# Target variable
 y = df["Safe/Not Safe"]
 le = LabelEncoder()
 y = le.fit_transform(y)
 
-# Ensure dataset has both classes
+# Force at least 2 classes (Safe + Not Safe)
 if len(np.unique(y)) < 2:
-    dummy_row = df.iloc[0].copy()
-    dummy_row["Active Ingredient"] = "DummyUnsafe"
-    dummy_row["Safe/Not Safe"] = "Not Safe"
-    df = pd.concat([df, pd.DataFrame([dummy_row])], ignore_index=True)
-    y = df["Safe/Not Safe"]
-    y = le.fit_transform(y)
+    dummy = df.iloc[0].copy()
+    dummy["Active Ingredient"] = "DummyUnsafe"
+    dummy["Safe/Not Safe"] = "Not Safe"
+    df = pd.concat([df, pd.DataFrame([dummy])], ignore_index=True)
+    y = le.fit_transform(df["Safe/Not Safe"])
 
+# Numeric columns for ML
 numeric_cols = [
     "Days Until Expiry",
     "Storage Temperature (C)",
@@ -549,10 +431,9 @@ numeric_cols = [
     "Warning Labels Present"
 ]
 
-if df["Warning Labels Present"].dtype == "object":
-    df["Warning Labels Present"] = df["Warning Labels Present"].map({"Yes": 1, "No": 0})
-
+# Final ML input
 X = df[["Active Ingredient", "Disease/Use Case"] + numeric_cols]
+
 
 # ===============================
 # Train Model
