@@ -188,7 +188,7 @@ if len(np.unique(y)) < 2:
 
 
 # --------------------------
-# Train ML Model (use per-ingredient standard deltas + persist)
+# Train / Load ML Model (Silent Mode)
 # --------------------------
 
 MODEL_DIR = pathlib.Path("models")
@@ -196,32 +196,31 @@ MODEL_DIR.mkdir(exist_ok=True)
 MODEL_PATH = MODEL_DIR / "std_delta_pipeline.joblib"
 LABEL_PATH = MODEL_DIR / "std_label_encoder.joblib"
 
-# --- Try to load an existing saved model to avoid retraining on every run ---
 model = None
+
+# 1. Try loading saved model first (silent)
 try:
     if MODEL_PATH.exists() and LABEL_PATH.exists():
         pipeline = joblib.load(MODEL_PATH)
         le = joblib.load(LABEL_PATH)
         model = pipeline
-        st.info("Loaded existing trained model.")
-    else:
-        st.info("No saved model found; will train a fresh model.")
 except Exception:
-    # print traceback to server logs for debugging, but keep UI messages quiet
-    import traceback
-    traceback.print_exc()
-    st.info("Saved model couldn't be loaded; will train a fresh model (or use rule-based comparator).")
     model = None
 
-# compute per-ingredient standard medians (used for delta features)
+# 2. Compute standard stats
 std_stats = df.groupby("Active Ingredient")[num_cols].median()
 global_std = std_stats.median() if not std_stats.empty else df[num_cols].median()
 
-# build augmented dataset that includes deltas to standard
+# 3. Build augmented DF
 def build_augmented_df(raw_df):
     aug = raw_df.copy().reset_index(drop=True)
-    aug = aug.merge(std_stats, how="left", left_on="Active Ingredient", right_index=True, suffixes=("", "_std"))
+    aug = aug.merge(std_stats, how="left",
+                    left_on="Active Ingredient",
+                    right_index=True,
+                    suffixes=("", "_std"))
+
     global_meds = std_stats.median().to_dict() if not std_stats.empty else df[num_cols].median().to_dict()
+
     for c in num_cols:
         std_col = c + "_std"
         if std_col not in aug.columns:
@@ -229,32 +228,30 @@ def build_augmented_df(raw_df):
         else:
             aug[std_col] = aug[std_col].fillna(global_meds.get(c, 0))
         aug["d_" + c] = aug[c].astype(float) - aug[std_col].astype(float)
-    # drop std helper cols
-    std_cols_to_drop = [c + "_std" for c in num_cols]
-    aug = aug.drop(columns=[c for c in std_cols_to_drop if c in aug.columns], errors="ignore")
+
+    aug = aug.drop(columns=[c + "_std" for c in num_cols], errors="ignore")
     return aug
 
 df_aug = build_augmented_df(df)
 
-# features: text + absolute numeric + delta numeric
+# Prepare features
 text_cols = ["Active Ingredient", "Disease/Use Case"]
 abs_cols = list(num_cols)
 delta_cols = ["d_" + c for c in num_cols]
 feature_cols = text_cols + abs_cols + delta_cols
 
-X_aug = df_aug[feature_cols].copy()
-y_aug = df_aug["Safe/Not Safe"].copy()
+X_aug = df_aug[feature_cols]
+y_aug = df_aug["Safe/Not Safe"]
 
-# encode target
+# Encode target
 le = LabelEncoder()
 y_enc = le.fit_transform(y_aug)
 
-# pipeline: TF-IDF for texts + numeric imputer+scaler + RandomForest
+# Build pipeline (no UI messages)
 numeric_feature_list = abs_cols + delta_cols
-
 numeric_transformer = Pipeline([
     ("imputer", SimpleImputer(strategy="median")),
-    ("scaler", StandardScaler())
+    ("scaler", StandardScaler()),
 ])
 
 preproc = ColumnTransformer([
@@ -263,78 +260,54 @@ preproc = ColumnTransformer([
     ("num", numeric_transformer, numeric_feature_list),
 ], remainder="drop")
 
-base_clf = RandomForestClassifier(n_estimators=200, class_weight="balanced", random_state=42, n_jobs=-1)
-
 pipeline = Pipeline([
     ("preprocess", preproc),
-    ("clf", base_clf)
+    ("clf", RandomForestClassifier(
+        n_estimators=200, class_weight="balanced",
+        random_state=42, n_jobs=-1
+    ))
 ])
 
-# train / evaluate with simple holdout
+# 4. Train model only if not loaded
 if model is None:
     try:
         strat = y_enc if len(np.unique(y_enc)) > 1 and len(y_enc) >= 4 else None
         X_train, X_test, y_train, y_test = train_test_split(
-            X_aug, y_enc, test_size=0.2, random_state=42, stratify=strat
+            X_aug, y_enc, test_size=0.2,
+            random_state=42, stratify=strat
         )
         pipeline.fit(X_train, y_train)
 
-        # optional calibration (may fail if dataset small) — wrap the fitted classifier
+        # Try calibration silently
         try:
             X_train_trans = pipeline.named_steps["preprocess"].transform(X_train)
-            calib = CalibratedClassifierCV(pipeline.named_steps["clf"], method="isotonic", cv=3)
+            calib = CalibratedClassifierCV(
+                pipeline.named_steps["clf"], method="isotonic", cv=3
+            )
             calib.fit(X_train_trans, y_train)
             pipeline.named_steps["clf"] = calib
         except Exception:
-            # calibration skipped if small data or failure
             pass
 
-        # evaluate
-        try:
-            y_pred = pipeline.predict(X_test)
-            acc = accuracy_score(y_test, y_pred)
-            st.success(f"Trained model holdout accuracy: {acc:.3f}")
-            st.text(classification_report(y_test, y_pred, zero_division=0))
-            st.write("Confusion matrix:")
-            st.write(confusion_matrix(y_test, y_pred))
-        except Exception:
-            st.info("Trained model but evaluation failed (likely small dataset).")
-
-        # persist pipeline & label encoder
+        # Save silently
         try:
             joblib.dump(pipeline, MODEL_PATH)
             joblib.dump(le, LABEL_PATH)
-            st.info(f"Saved model and encoder to {MODEL_DIR}")
-        except Exception:
-            st.warning("Could not save model to disk (host FS may be ephemeral).")
-
-        # attach feature_names_in_ to pipeline for safe prediction ordering
-        try:
-            pipeline.feature_names_in_ = np.array(feature_cols, dtype=object)
         except Exception:
             pass
 
-        # set global model variable used by Testing page
         model = pipeline
 
     except Exception:
-        # Log full traceback to server logs (useful for debugging), but avoid alarming users
-        import traceback
-        traceback.print_exc()
-        st.warning("Model training encountered an issue; using rule-based comparator and a simple fallback model if needed.")
-
+        # Training failed silently → use fallback model
         from sklearn.dummy import DummyClassifier
         dummy = DummyClassifier(strategy="most_frequent")
         try:
             dummy.fit(X_aug.fillna(0), y_enc)
             model = dummy
-            st.info("Using a simple fallback model (most frequent class).")
         except Exception:
-            st.warning("Fallback model unavailable — the rule-based comparator will be used instead.")
             model = None
-else:
-    # model was loaded earlier; skip retraining
-    st.info("Using previously loaded model; skipping retrain.")
+
 
 
 # --------------------------
