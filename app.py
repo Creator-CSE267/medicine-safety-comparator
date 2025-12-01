@@ -1101,8 +1101,10 @@ elif menu == "📦 Inventory":
         docs = list(consumables_col.find({}))
         for d in docs:
             d["_id"] = str(d["_id"])
-            for k in ["Item Name", "Category", "UPC", "Quantity in Stock",
-                      "Expiry Period (Months)", "Storage Temperature (C)", "Safe/Not Safe"]:
+            for k in [
+                "Item Name", "Category", "UPC", "Quantity in Stock",
+                "Expiry Period (Months)", "Storage Temperature (C)", "Safe/Not Safe"
+            ]:
                 if k not in d:
                     d[k] = None
         return pd.DataFrame(docs)
@@ -1113,18 +1115,17 @@ elif menu == "📦 Inventory":
     tab1, tab2 = st.tabs(["💊 Medicines", "🛠 Consumables"])
 
     # ------------------------------
-    # Helper: apply filters to a DF
+    # Helper: apply filters to a DF (Medicines)
     # ------------------------------
     def apply_medicine_filters(df):
-        # UI controls
-        with st.expander("🔎 Filters", expanded=False):
+        with st.expander("🔎 Filters (Medicines)", expanded=False):
             col1, col2, col3 = st.columns(3)
-            f_upc = col1.text_input("Filter UPC", value="")
-            f_ing = col1.text_input("Filter Ingredient", value="")
-            f_batch = col2.text_input("Filter Batch", value="")
-            f_mf = col2.text_input("Filter Manufacturer", value="")
-            f_low_stock = col3.number_input("Low stock threshold (≤)", min_value=0, value=0, step=1)
-            # apply filters
+            f_upc = col1.text_input("Filter UPC", value="", key="med_f_upc")
+            f_ing = col1.text_input("Filter Ingredient", value="", key="med_f_ing")
+            f_batch = col2.text_input("Filter Batch", value="", key="med_f_batch")
+            f_mf = col2.text_input("Filter Manufacturer", value="", key="med_f_mf")
+            f_low_stock = col3.number_input("Low stock threshold (≤)", min_value=0, value=0, step=1, key="med_f_low_stock")
+
             df_filtered = df.copy()
             if f_upc.strip():
                 df_filtered = df_filtered[df_filtered["UPC"].astype(str).str.contains(f_upc.strip(), case=False, na=False)]
@@ -1134,59 +1135,36 @@ elif menu == "📦 Inventory":
                 df_filtered = df_filtered[df_filtered["Batch"].astype(str).str.contains(f_batch.strip(), case=False, na=False)]
             if f_mf.strip():
                 df_filtered = df_filtered[df_filtered["Manufacturer"].astype(str).str.contains(f_mf.strip(), case=False, na=False)]
-            if f_low_stock > 0:
-                if "Stock" in df_filtered.columns:
-                    df_filtered["Stock"] = pd.to_numeric(df_filtered["Stock"], errors="coerce").fillna(0).astype(int)
-                    df_filtered = df_filtered[df_filtered["Stock"] <= int(f_low_stock)]
-            return df_filtered
-
-def apply_consumable_filters(df):
-    with st.expander("🔎 Filters", expanded=False):
-        col1, col2, col3 = st.columns(3)
-
-        f_name = col1.text_input("Filter Item Name", value="", key="cons_filter_name")
-        f_cat = col1.text_input("Filter Category", value="", key="cons_filter_cat")
-        f_upc = col2.text_input("Filter UPC", value="", key="cons_filter_upc")
-        f_safe = col3.selectbox("Safe / Not Safe", ["All", "Safe", "Not Safe"], key="cons_filter_safe")
-        f_low_qty = col3.number_input(
-            "Low qty threshold (≤)", 
-            min_value=0, 
-            value=0, 
-            step=1, 
-            key="cons_filter_low_qty"
-        )
-
-        df_filtered = df.copy()
-
-        if f_name.strip():
-            df_filtered = df_filtered[
-                df_filtered["Item Name"].astype(str).str.contains(f_name.strip(), case=False, na=False)
-            ]
-
-        if f_cat.strip():
-            df_filtered = df_filtered[
-                df_filtered["Category"].astype(str).str.contains(f_cat.strip(), case=False, na=False)
-            ]
-
-        if f_upc.strip():
-            df_filtered = df_filtered[
-                df_filtered["UPC"].astype(str).str.contains(f_upc.strip(), case=False, na=False)
-            ]
-
-        if f_safe != "All":
-            df_filtered = df_filtered[df_filtered["Safe/Not Safe"] == f_safe]
-
-        if f_low_qty > 0:
-            if "Quantity in Stock" in df_filtered.columns:
-                df_filtered["Quantity in Stock"] = (
-                    pd.to_numeric(df_filtered["Quantity in Stock"], errors="coerce")
-                    .fillna(0)
-                    .astype(int)
-                )
-                df_filtered = df_filtered[df_filtered["Quantity in Stock"] <= int(f_low_qty)]
-
+            if f_low_stock > 0 and "Stock" in df_filtered.columns:
+                df_filtered["Stock"] = pd.to_numeric(df_filtered["Stock"], errors="coerce").fillna(0).astype(int)
+                df_filtered = df_filtered[df_filtered["Stock"] <= int(f_low_stock)]
         return df_filtered
 
+    # ------------------------------
+    # Helper: apply filters to a DF (Consumables) — correctly indented
+    # ------------------------------
+    def apply_consumable_filters(df):
+        with st.expander("🔎 Filters (Consumables)", expanded=False):
+            col1, col2, col3 = st.columns(3)
+            f_name = col1.text_input("Filter Item Name", value="", key="cons_f_name")
+            f_cat = col1.text_input("Filter Category", value="", key="cons_f_cat")
+            f_upc = col2.text_input("Filter UPC", value="", key="cons_f_upc")
+            f_safe = col3.selectbox("Safe / Not Safe", ["All", "Safe", "Not Safe"], key="cons_f_safe")
+            f_low_qty = col3.number_input("Low qty threshold (≤)", min_value=0, value=0, step=1, key="cons_f_low_qty")
+
+            df_filtered = df.copy()
+            if f_name.strip():
+                df_filtered = df_filtered[df_filtered["Item Name"].astype(str).str.contains(f_name.strip(), case=False, na=False)]
+            if f_cat.strip():
+                df_filtered = df_filtered[df_filtered["Category"].astype(str).str.contains(f_cat.strip(), case=False, na=False)]
+            if f_upc.strip():
+                df_filtered = df_filtered[df_filtered["UPC"].astype(str).str.contains(f_upc.strip(), case=False, na=False)]
+            if f_safe != "All":
+                df_filtered = df_filtered[df_filtered["Safe/Not Safe"] == f_safe]
+            if f_low_qty > 0 and "Quantity in Stock" in df_filtered.columns:
+                df_filtered["Quantity in Stock"] = pd.to_numeric(df_filtered["Quantity in Stock"], errors="coerce").fillna(0).astype(int)
+                df_filtered = df_filtered[df_filtered["Quantity in Stock"] <= int(f_low_qty)]
+        return df_filtered
 
 
     # ===========================
@@ -1201,16 +1179,16 @@ def apply_consumable_filters(df):
         c1.metric("Total Medicines", total_items)
         c2.metric("Total Stock", int(total_stock))
 
-        # Add / Update form (same as before)
+        # Add / Update form (Medicines)
         st.markdown("### ➕ Add / Update Medicine")
-        with st.form("add_med"):
+        with st.form("add_med_form"):
             colA, colB, colC = st.columns(3)
-            upc = colA.text_input("UPC")
-            ing = colA.text_input("Ingredient")
-            mf = colB.text_input("Manufacturer")
-            batch = colB.text_input("Batch")
-            stock = colC.number_input("Stock", min_value=0, value=1)
-            expiry = colC.date_input("Expiry Date")
+            upc = colA.text_input("UPC", key="add_med_upc")
+            ing = colA.text_input("Ingredient", key="add_med_ing")
+            mf = colB.text_input("Manufacturer", key="add_med_mf")
+            batch = colB.text_input("Batch", key="add_med_batch")
+            stock = colC.number_input("Stock", min_value=0, value=1, key="add_med_stock")
+            expiry = colC.date_input("Expiry Date", key="add_med_expiry")
             if st.form_submit_button("Save Medicine"):
                 if not upc.strip():
                     st.error("UPC is required.")
@@ -1245,24 +1223,24 @@ def apply_consumable_filters(df):
             # selection uses filtered list (map to original _id)
             labels = [f"{r.get('Ingredient','(no name)')} | UPC:{r.get('UPC','')} | Batch:{r.get('Batch','')}" for _, r in meds_filtered.iterrows()]
             idx_list = list(meds_filtered.index)
-            sel_idx = st.selectbox("Select medicine", options=list(range(len(labels))), format_func=lambda i: labels[i])
+            sel_idx = st.selectbox("Select medicine", options=list(range(len(labels))), format_func=lambda i: labels[i], key="med_select")
             real_idx = idx_list[sel_idx]
             rec = meds_filtered.loc[real_idx]
             sel_id = rec["_id"]
 
             col1, col2, col3 = st.columns(3)
-            new_ing = col1.text_input("Ingredient", rec.get("Ingredient", ""))
-            new_upc = col1.text_input("UPC", rec.get("UPC", ""))
-            new_mf = col2.text_input("Manufacturer", rec.get("Manufacturer", ""))
-            new_batch = col2.text_input("Batch", rec.get("Batch", ""))
-            new_stock = col3.number_input("Stock", min_value=0, value=int(rec.get("Stock") or 0))
+            new_ing = col1.text_input("Ingredient", rec.get("Ingredient", ""), key="edit_med_ing")
+            new_upc = col1.text_input("UPC", rec.get("UPC", ""), key="edit_med_upc")
+            new_mf = col2.text_input("Manufacturer", rec.get("Manufacturer", ""), key="edit_med_mf")
+            new_batch = col2.text_input("Batch", rec.get("Batch", ""), key="edit_med_batch")
+            new_stock = col3.number_input("Stock", min_value=0, value=int(rec.get("Stock") or 0), key="edit_med_stock")
             try:
                 old_exp = pd.to_datetime(rec.get("Expiry")).date()
             except:
                 old_exp = datetime.today().date()
-            new_exp = col3.date_input("Expiry", old_exp)
+            new_exp = col3.date_input("Expiry", old_exp, key="edit_med_expiry")
 
-            if st.button("Save Medicine Changes"):
+            if st.button("Save Medicine Changes", key="save_med_changes"):
                 inv_col.update_one({"_id": ObjectId(sel_id)}, {"$set": {
                     "Ingredient": new_ing.strip(),
                     "UPC": new_upc.strip(),
@@ -1274,104 +1252,95 @@ def apply_consumable_filters(df):
                 st.success("Updated.")
                 st.rerun()
 
-            if st.button("Delete Medicine"):
+            if st.button("Delete Medicine", key="delete_med"):
                 inv_col.delete_one({"_id": ObjectId(sel_id)})
                 st.success("Deleted.")
                 st.rerun()
 
+
     # ===========================
     # TAB 2 → CONSUMABLES
     # ===========================
-# ===========================
-# TAB 2 → CONSUMABLES
-# ===========================
-with tab2:
-    st.subheader("🛠 Consumables Inventory")
+    with tab2:
+        st.subheader("🛠 Consumables Inventory")
 
-    total_items = len(cons)
-    total_qty = cons["Quantity in Stock"].fillna(0).astype(int).sum() if not cons.empty else 0
-    c1, c2 = st.columns(2)
-    c1.metric("Total Consumables", total_items)
-    c2.metric("Total Quantity", int(total_qty))
+        total_items = len(cons)
+        total_qty = cons["Quantity in Stock"].fillna(0).astype(int).sum() if not cons.empty else 0
+        c1, c2 = st.columns(2)
+        c1.metric("Total Consumables", total_items)
+        c2.metric("Total Quantity", int(total_qty))
 
-    st.markdown("### ➕ Add / Update Consumable")
-    with st.form("add_cons"):
-        colA, colB = st.columns(2)
-        name = colA.text_input("Item Name")
-        category = colA.text_input("Category")
-        upc = colB.text_input("UPC")
-        qty = colB.number_input("Quantity", min_value=0, value=1)
-        expiry_m = colA.number_input("Expiry (Months)", min_value=0, value=12)
-        storage = colB.number_input("Storage Temp (°C)", value=25)
-        safe_flag = colA.selectbox("Safe / Not Safe", ["Safe", "Not Safe"])
-        if st.form_submit_button("Save Consumable"):
-            doc = {
-                "Item Name": name.strip(),
-                "Category": category.strip(),
-                "UPC": upc.strip(),
-                "Quantity in Stock": int(qty),
-                "Expiry Period (Months)": int(expiry_m),
-                "Storage Temperature (C)": storage,
-                "Safe/Not Safe": safe_flag
-            }
-            existing = consumables_col.find_one({"UPC": doc["UPC"]}) if doc["UPC"] else None
-            if existing:
-                consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
-            else:
-                consumables_col.insert_one(doc)
-            st.success("Consumable saved.")
-            st.rerun()
+        st.markdown("### ➕ Add / Update Consumable")
+        with st.form("add_cons_form"):
+            colA, colB = st.columns(2)
+            name = colA.text_input("Item Name", key="add_cons_name")
+            category = colA.text_input("Category", key="add_cons_cat")
+            upc = colB.text_input("UPC", key="add_cons_upc")
+            qty = colB.number_input("Quantity", min_value=0, value=1, key="add_cons_qty")
+            expiry_m = colA.number_input("Expiry (Months)", min_value=0, value=12, key="add_cons_expiry")
+            storage = colB.number_input("Storage Temp (°C)", value=25, key="add_cons_storage")
+            safe_flag = colA.selectbox("Safe / Not Safe", ["Safe", "Not Safe"], key="add_cons_safe")
+            if st.form_submit_button("Save Consumable"):
+                doc = {
+                    "Item Name": name.strip(),
+                    "Category": category.strip(),
+                    "UPC": upc.strip(),
+                    "Quantity in Stock": int(qty),
+                    "Expiry Period (Months)": int(expiry_m),
+                    "Storage Temperature (C)": storage,
+                    "Safe/Not Safe": safe_flag
+                }
+                existing = consumables_col.find_one({"UPC": doc["UPC"]}) if doc["UPC"] else None
+                if existing:
+                    consumables_col.update_one({"_id": existing["_id"]}, {"$set": doc})
+                else:
+                    consumables_col.insert_one(doc)
+                st.success("Consumable saved.")
+                st.rerun()
 
-    st.markdown("### 📋 Consumables List (use Filters to narrow results)")
-    cons_filtered = apply_consumable_filters(cons) if not cons.empty else cons
+        st.markdown("### 📋 Consumables List (use Filters to narrow results)")
+        cons_filtered = apply_consumable_filters(cons) if not cons.empty else cons
 
-    if cons_filtered.empty:
-        st.info("No consumables found for the selected filters.")
-    else:
-        show2 = cons_filtered.copy().drop(columns=["_id"], errors="ignore")
-        st.dataframe(show2, use_container_width=True)
+        if cons_filtered.empty:
+            st.info("No consumables found for the selected filters.")
+        else:
+            show2 = cons_filtered.copy().drop(columns=["_id"], errors="ignore")
+            st.dataframe(show2, use_container_width=True)
 
-        labels = [
-            f"{r.get('Item Name','(no name)')} | UPC:{r.get('UPC','')} | Qty:{int(r.get('Quantity in Stock') or 0)}"
-            for _, r in cons_filtered.iterrows()
-        ]
-        idx_list = list(cons_filtered.index)
-        sel_idx = st.selectbox("Select consumable", options=list(range(len(labels))), format_func=lambda i: labels[i])
-        real_idx = idx_list[sel_idx]
-        rec = cons_filtered.loc[real_idx]
-        sel_id = rec["_id"]
+            labels = [
+                f"{r.get('Item Name','(no name)')} | UPC:{r.get('UPC','')} | Qty:{int(r.get('Quantity in Stock') or 0)}"
+                for _, r in cons_filtered.iterrows()
+            ]
+            idx_list = list(cons_filtered.index)
+            sel_idx = st.selectbox("Select consumable", options=list(range(len(labels))), format_func=lambda i: labels[i], key="cons_select")
+            real_idx = idx_list[sel_idx]
+            rec = cons_filtered.loc[real_idx]
+            sel_id = rec["_id"]
 
-        col1, col2 = st.columns(2)
-        new_item = col1.text_input("Item Name", rec.get("Item Name", ""))
-        new_cat = col1.text_input("Category", rec.get("Category", ""))
-        new_upc = col2.text_input("UPC", rec.get("UPC", ""))
-        new_qty = col2.number_input("Quantity", min_value=0, value=int(rec.get("Quantity in Stock") or 0))
-        new_exp = col1.number_input("Expiry (Months)", min_value=0, value=int(rec.get("Expiry Period (Months)") or 0))
-        new_safe = col2.selectbox(
-            "Safe / Not Safe",
-            ["Safe", "Not Safe"],
-            index=0 if rec.get("Safe/Not Safe", "Safe") == "Safe" else 1
-        )
+            col1, col2 = st.columns(2)
+            new_item = col1.text_input("Item Name", rec.get("Item Name", ""), key="edit_cons_name")
+            new_cat = col1.text_input("Category", rec.get("Category", ""), key="edit_cons_cat")
+            new_upc = col2.text_input("UPC", rec.get("UPC", ""), key="edit_cons_upc")
+            new_qty = col2.number_input("Quantity", min_value=0, value=int(rec.get("Quantity in Stock") or 0), key="edit_cons_qty")
+            new_exp = col1.number_input("Expiry (Months)", min_value=0, value=int(rec.get("Expiry Period (Months)") or 0), key="edit_cons_expiry")
+            new_safe = col2.selectbox("Safe / Not Safe", ["Safe", "Not Safe"], index=0 if rec.get("Safe/Not Safe","Safe")=="Safe" else 1, key="edit_cons_safe")
 
-        if st.button("Save Consumable Changes"):
-            consumables_col.update_one(
-                {"_id": ObjectId(sel_id)},
-                {"$set": {
+            if st.button("Save Consumable Changes", key="save_cons_changes"):
+                consumables_col.update_one({"_id": ObjectId(sel_id)}, {"$set": {
                     "Item Name": new_item.strip(),
                     "Category": new_cat.strip(),
                     "UPC": new_upc.strip(),
                     "Quantity in Stock": int(new_qty),
                     "Expiry Period (Months)": int(new_exp),
                     "Safe/Not Safe": new_safe
-                }}
-            )
-            st.success("Updated.")
-            st.rerun()
+                }})
+                st.success("Updated.")
+                st.rerun()
 
-        if st.button("Delete Consumable"):
-            consumables_col.delete_one({"_id": ObjectId(sel_id)})
-            st.success("Deleted.")
-            st.rerun()
+            if st.button("Delete Consumable", key="delete_cons"):
+                consumables_col.delete_one({"_id": ObjectId(sel_id)})
+                st.success("Deleted.")
+                st.rerun()
 
 
 # =========================================================
