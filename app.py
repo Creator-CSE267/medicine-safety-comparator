@@ -196,6 +196,23 @@ MODEL_DIR.mkdir(exist_ok=True)
 MODEL_PATH = MODEL_DIR / "std_delta_pipeline.joblib"
 LABEL_PATH = MODEL_DIR / "std_label_encoder.joblib"
 
+# --- Try to load an existing saved model to avoid retraining on every run ---
+model = None
+try:
+    if MODEL_PATH.exists() and LABEL_PATH.exists():
+        pipeline = joblib.load(MODEL_PATH)
+        le = joblib.load(LABEL_PATH)
+        model = pipeline
+        st.info("Loaded existing trained model.")
+    else:
+        st.info("No saved model found; will train a fresh model.")
+except Exception:
+    # print traceback to server logs for debugging, but keep UI messages quiet
+    import traceback
+    traceback.print_exc()
+    st.info("Saved model couldn't be loaded; will train a fresh model (or use rule-based comparator).")
+    model = None
+
 # compute per-ingredient standard medians (used for delta features)
 std_stats = df.groupby("Active Ingredient")[num_cols].median()
 global_std = std_stats.median() if not std_stats.empty else df[num_cols].median()
@@ -254,59 +271,70 @@ pipeline = Pipeline([
 ])
 
 # train / evaluate with simple holdout
-try:
-    strat = y_enc if len(np.unique(y_enc)) > 1 and len(y_enc) >= 4 else None
-    X_train, X_test, y_train, y_test = train_test_split(X_aug, y_enc, test_size=0.2, random_state=42, stratify=strat)
-    pipeline.fit(X_train, y_train)
-
-    # optional calibration (may fail if dataset small) — wrap the fitted classifier
+if model is None:
     try:
-        X_train_trans = pipeline.named_steps["preprocess"].transform(X_train)
-        calib = CalibratedClassifierCV(pipeline.named_steps["clf"], method="isotonic", cv=3)
-        calib.fit(X_train_trans, y_train)
-        pipeline.named_steps["clf"] = calib
-    except Exception:
-        # calibration skipped if small data or failure
-        pass
+        strat = y_enc if len(np.unique(y_enc)) > 1 and len(y_enc) >= 4 else None
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_aug, y_enc, test_size=0.2, random_state=42, stratify=strat
+        )
+        pipeline.fit(X_train, y_train)
 
-    # evaluate
-    try:
-        y_pred = pipeline.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        st.success(f"Trained model holdout accuracy: {acc:.3f}")
-        st.text(classification_report(y_test, y_pred, zero_division=0))
-        st.write("Confusion matrix:")
-        st.write(confusion_matrix(y_test, y_pred))
-    except Exception:
-        st.info("Trained model but evaluation failed (likely small dataset).")
+        # optional calibration (may fail if dataset small) — wrap the fitted classifier
+        try:
+            X_train_trans = pipeline.named_steps["preprocess"].transform(X_train)
+            calib = CalibratedClassifierCV(pipeline.named_steps["clf"], method="isotonic", cv=3)
+            calib.fit(X_train_trans, y_train)
+            pipeline.named_steps["clf"] = calib
+        except Exception:
+            # calibration skipped if small data or failure
+            pass
 
-    # persist pipeline & label encoder
-    try:
-        joblib.dump(pipeline, MODEL_PATH)
-        joblib.dump(le, LABEL_PATH)
-        st.info(f"Saved model and encoder to {MODEL_DIR}")
-    except Exception:
-        st.warning("Could not save model to disk (host FS may be ephemeral).")
+        # evaluate
+        try:
+            y_pred = pipeline.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            st.success(f"Trained model holdout accuracy: {acc:.3f}")
+            st.text(classification_report(y_test, y_pred, zero_division=0))
+            st.write("Confusion matrix:")
+            st.write(confusion_matrix(y_test, y_pred))
+        except Exception:
+            st.info("Trained model but evaluation failed (likely small dataset).")
 
-    # attach feature_names_in_ to pipeline for safe prediction ordering
-    try:
-        pipeline.feature_names_in_ = np.array(feature_cols, dtype=object)
-    except Exception:
-        pass
+        # persist pipeline & label encoder
+        try:
+            joblib.dump(pipeline, MODEL_PATH)
+            joblib.dump(le, LABEL_PATH)
+            st.info(f"Saved model and encoder to {MODEL_DIR}")
+        except Exception:
+            st.warning("Could not save model to disk (host FS may be ephemeral).")
 
-    # set global model variable used by Testing page
-    model = pipeline
+        # attach feature_names_in_ to pipeline for safe prediction ordering
+        try:
+            pipeline.feature_names_in_ = np.array(feature_cols, dtype=object)
+        except Exception:
+            pass
 
-except Exception:
-    import traceback; traceback.print_exc()
-    st.error("Model training failed - falling back to simple model.")
-    from sklearn.dummy import DummyClassifier
-    dummy = DummyClassifier(strategy="most_frequent")
-    try:
-        dummy.fit(X_aug.fillna(0), y_enc)
-        model = dummy
+        # set global model variable used by Testing page
+        model = pipeline
+
     except Exception:
-        model = None
+        # Log full traceback to server logs (useful for debugging), but avoid alarming users
+        import traceback
+        traceback.print_exc()
+        st.warning("Model training encountered an issue; using rule-based comparator and a simple fallback model if needed.")
+
+        from sklearn.dummy import DummyClassifier
+        dummy = DummyClassifier(strategy="most_frequent")
+        try:
+            dummy.fit(X_aug.fillna(0), y_enc)
+            model = dummy
+            st.info("Using a simple fallback model (most frequent class).")
+        except Exception:
+            st.warning("Fallback model unavailable — the rule-based comparator will be used instead.")
+            model = None
+else:
+    # model was loaded earlier; skip retraining
+    st.info("Using previously loaded model; skipping retrain.")
 
 
 # --------------------------
@@ -561,177 +589,181 @@ if menu == "🧪 Testing":
     # -------------------------
     # Helper: build competitor DataFrame for model
     # -------------------------
-    def build_comp_df(active_ing, disease, numeric_dict):
-        rec = {"Active Ingredient": active_ing or "Unknown", "Disease/Use Case": disease or "Unknown"}
-        for cc in num_cols:
-            try:
-                rec[cc] = float(numeric_dict.get(cc, 0.0))
-            except Exception:
-                rec[cc] = 0.0
-        return pd.DataFrame([rec])
+def build_comp_df(active_ing, disease, numeric_dict):
+    rec = {"Active Ingredient": active_ing or "Unknown", "Disease/Use Case": disease or "Unknown"}
+    for cc in num_cols:
+        try:
+            rec[cc] = float(numeric_dict.get(cc, 0.0))
+        except Exception:
+            rec[cc] = 0.0
+    return pd.DataFrame([rec])
 
-          # inside your if st.button("🔎 Compare"):
-        if selected is None and (not ingr_input or ingr_input.strip() == ""):
-            st.error("⚠️ Please enter a valid UPC or Active Ingredient first.")
+# -------------------------
+# Compare button handler — MUST be at top-level inside Testing page (not inside any function)
+# -------------------------
+if st.button("🔎 Compare"):
+    # basic validation
+    if selected is None and (not ingr_input or ingr_input.strip() == ""):
+        st.error("⚠️ Please enter a valid UPC or Active Ingredient first.")
+    else:
+        active_ing = ingr_input if ingr_input else (selected.get("Active Ingredient") if selected is not None else "Unknown")
+        disease = selected.get("Disease/Use Case", "Unknown") if selected is not None else "Unknown"
+
+        # Build competitor dict from comp_vals (user inputs)
+        competitor_dict = {}
+        for c in num_cols:
+            try:
+                competitor_dict[c] = float(comp_vals.get(c, 0.0))
+            except Exception:
+                competitor_dict[c] = 0.0
+
+        # Get std_row for this active ingredient (fallback to global)
+        try:
+            std_row = std_stats.loc[active_ing]
+        except Exception:
+            std_row = global_std
+
+        # Option A: use rule-based strict comparator (recommended)
+        rule_out = predict_rule_based(active_ing, competitor_dict, std_row=std_row)
+        result = rule_out["result"]
+        details = rule_out["details"]
+        confidence = rule_out["confidence"]
+
+        # Display result + details
+        if result.lower() == "safe":
+            st.success(f"✅ Prediction → {result} (confidence {confidence:.2f})")
         else:
-            active_ing = ingr_input if ingr_input else (selected.get("Active Ingredient") if selected is not None else "Unknown")
-            disease = selected.get("Disease/Use Case", "Unknown") if selected is not None else "Unknown"
+            st.error(f"❌ Prediction → {result} (confidence {confidence:.2f})")
 
-            # Build competitor dict from comp_vals (user inputs)
-            competitor_dict = {}
-            for c in num_cols:
-                try:
-                    competitor_dict[c] = float(comp_vals.get(c, 0.0))
-                except Exception:
-                    competitor_dict[c] = 0.0
-
-            # Get std_row for this active ingredient (fallback to global)
-            try:
-                std_row = std_stats.loc[active_ing]
-            except Exception:
-                std_row = global_std
-
-            # Run the strict rule-based comparator
-            rule_out = predict_rule_based(active_ing, competitor_dict, std_row=std_row)
-            result = rule_out["result"]
-            details = rule_out["details"]
-            confidence = rule_out["confidence"]
-
-            # Display result + details
-            if result.lower() == "safe":
-                st.success(f"✅ Prediction → {result} (confidence {confidence:.2f})")
+        st.markdown("### 🔎 Per-criterion details")
+        for d in details:
+            if "PASS" in d:
+                st.markdown(f"<div style='color:green'>{d}</div>", unsafe_allow_html=True)
             else:
-                st.error(f"❌ Prediction → {result} (confidence {confidence:.2f})")
+                st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
 
-            st.markdown("### 🔎 Per-criterion details")
-            for d in details:
-                # color-coded lines
-                if "PASS" in d:
-                    st.markdown(f"<div style='color:green'>{d}</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div style='color:red'>{d}</div>", unsafe_allow_html=True)
+        # Generate suggestions and display them
+        suggestions_list = suggestions(competitor_dict)
+        if suggestions_list:
+            st.subheader("🔧 Suggested Improvements")
+            for s in suggestions_list:
+                st.write(f"- {s}")
 
-            # Generate suggestions from rule-based check (based on competitor values)
-            suggestions_list = suggestions(competitor_dict)
-            if suggestions_list:
-                st.subheader("🔧 Suggested Improvements")
-                for s in suggestions_list:
-                    st.write(f"- {s}")
+        # Chart compare standard vs competitor
+        fig, ax = plt.subplots(figsize=(10, 4))
+        x = np.arange(len(num_cols))
+        std_vals = [float(std_row.get(c, 0.0) or 0.0) for c in num_cols]
+        comp_vals_list = [competitor_dict[c] for c in num_cols]
 
-            # Chart compare standard vs competitor
-            fig, ax = plt.subplots(figsize=(10, 4))
-            x = np.arange(len(num_cols))
-            std_vals = [float(std_row.get(c, 0.0) or 0.0) for c in num_cols]
-            comp_vals_list = [competitor_dict[c] for c in num_cols]
+        ax.bar(x - 0.3, std_vals, width=0.3, label="Standard")
+        ax.bar(x + 0.3, comp_vals_list, width=0.3, label="Competitor")
+        ax.set_xticks(x)
+        ax.set_xticklabels(num_cols, rotation=35, ha="right")
+        ax.legend()
+        st.pyplot(fig)
 
-            ax.bar(x - 0.3, std_vals, width=0.3, label="Standard")
-            ax.bar(x + 0.3, comp_vals_list, width=0.3, label="Competitor")
-            ax.set_xticks(x)
-            ax.set_xticklabels(num_cols, rotation=35, ha="right")
-            ax.legend()
-            st.pyplot(fig)
-
-            # Log result (try Mongo first, else CSV)
-            log_doc = {
-                "timestamp": datetime.now().isoformat(),
-                "UPC": upc_input,
-                "Ingredient": active_ing,
-                "Competitor": comp_name,
-                "Result": result,
-                "confidence": confidence
-            }
-            logged = False
+        # Logging (Mongo then CSV fallback)
+        log_doc = {
+            "timestamp": datetime.now().isoformat(),
+            "UPC": upc_input,
+            "Ingredient": active_ing,
+            "Competitor": comp_name,
+            "Result": result,
+            "confidence": confidence
+        }
+        logged = False
+        try:
+            log_col.insert_one(log_doc)
+            logged = True
+            st.info("Logged result to MongoDB.")
+        except Exception:
+            st.warning("MongoDB logging failed — falling back to CSV.")
+        if not logged:
             try:
-                log_col.insert_one(log_doc)
-                logged = True
-                st.info("Logged result to MongoDB.")
+                lf = "test_logs.csv"
+                pd.DataFrame([log_doc]).to_csv(lf, mode="a", header=not os.path.exists(lf), index=False)
+                st.info(f"Logged result to CSV: {lf}")
             except Exception:
-                st.warning("MongoDB logging failed — falling back to CSV.")
-            if not logged:
+                st.error("Failed to log result.")
+
+        # PDF generation (keeps your existing code, includes suggestions)
+        try:
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.utils import ImageReader
+            import io
+
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            styles = getSampleStyleSheet()
+            elements = []
+
+            if os.path.exists("logo.png"):
                 try:
-                    lf = "test_logs.csv"
-                    pd.DataFrame([log_doc]).to_csv(lf, mode="a", header=not os.path.exists(lf), index=False)
-                    st.info(f"Logged result to CSV: {lf}")
-                except Exception:
-                    st.error("Failed to log result.")
-
-            # Build PDF (include suggestions_list)
-            try:
-                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-                from reportlab.lib.styles import getSampleStyleSheet
-                from reportlab.lib.pagesizes import A4
-                from reportlab.lib.utils import ImageReader
-                import io
-
-                buffer = io.BytesIO()
-                doc = SimpleDocTemplate(buffer, pagesize=A4)
-                styles = getSampleStyleSheet()
-                elements = []
-
-                if os.path.exists("logo.png"):
-                    try:
-                        elements.append(RLImage("logo.png", width=100, height=100))
-                        elements.append(Spacer(1, 12))
-                    except Exception:
-                        pass
-
-                elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
-                elements.append(Spacer(1, 12))
-                elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
-                elements.append(Paragraph(f"UPC: {selected['UPC'] if selected is not None else 'N/A'}", styles["Normal"]))
-                elements.append(Paragraph(f"Ingredient: {active_ing}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
-                elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
-                elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
-                elements.append(Paragraph(f"Address: {comp_addr}", styles["Normal"]))
-                elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-                if result.lower() == "safe":
-                    elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
-                else:
-                    elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                if suggestions_list:
-                    elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
-                    for s in suggestions_list:
-                        elements.append(Paragraph(f"- {s}", styles["Normal"]))
-                    elements.append(Spacer(1, 12))
-
-                elements.append(Paragraph("<b>Criteria Comparison (Standard vs Competitor)</b>", styles["Heading2"]))
-                for idx, c in enumerate(num_cols):
-                    elements.append(Paragraph(f"{c}: Standard = {std_vals[idx]}  |  Competitor = {comp_vals_list[idx]}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                # attach chart
-                chart_buffer = io.BytesIO()
-                fig.savefig(chart_buffer, format="png", bbox_inches="tight")
-                chart_buffer.seek(0)
-                try:
-                    img_reader = ImageReader(chart_buffer)
-                    elements.append(RLImage(img_reader, width=400, height=250))
+                    elements.append(RLImage("logo.png", width=100, height=100))
                     elements.append(Spacer(1, 12))
                 except Exception:
                     pass
 
-                doc.build(elements)
-                buffer.seek(0)
+            elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
+            elements.append(Spacer(1, 12))
+            elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
 
-                st.download_button(
-                    label="⬇️ Download PDF Report",
-                    data=buffer.getvalue(),
-                    file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf"
-                )
-            except Exception as e:
-                st.warning("Failed to generate PDF report: " + str(e))
+            elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
+            elements.append(Paragraph(f"UPC: {selected['UPC'] if selected is not None else 'N/A'}", styles["Normal"]))
+            elements.append(Paragraph(f"Ingredient: {active_ing}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+
+            elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
+            elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
+            elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
+            elements.append(Paragraph(f"Address: {comp_addr}", styles["Normal"]))
+            elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+
+            elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
+            if result.lower() == "safe":
+                elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
+            else:
+                elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+
+            if suggestions_list:
+                elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
+                for s in suggestions_list:
+                    elements.append(Paragraph(f"- {s}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+            elements.append(Paragraph("<b>Criteria Comparison (Standard vs Competitor)</b>", styles["Heading2"]))
+            for idx, c in enumerate(num_cols):
+                elements.append(Paragraph(f"{c}: Standard = {std_vals[idx]}  |  Competitor = {comp_vals_list[idx]}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+
+            # attach chart
+            chart_buffer = io.BytesIO()
+            fig.savefig(chart_buffer, format="png", bbox_inches="tight")
+            chart_buffer.seek(0)
+            try:
+                img_reader = ImageReader(chart_buffer)
+                elements.append(RLImage(img_reader, width=400, height=250))
+                elements.append(Spacer(1, 12))
+            except Exception:
+                pass
+
+            doc.build(elements)
+            buffer.seek(0)
+
+            st.download_button(
+                label="⬇️ Download PDF Report",
+                data=buffer.getvalue(),
+                file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.warning("Failed to generate PDF report: " + str(e))
+
 
 
 # =========================================================
