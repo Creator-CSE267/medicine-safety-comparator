@@ -241,21 +241,40 @@ def suggestions(vals):
 # --------------------------
 # Sidebar Navigation
 # --------------------------
+# -------------------- SIDEBAR ROLE MENU --------------------
 with st.sidebar:
-    st.markdown(f"### 👤 {username}")
-    st.markdown(f"Role: **{role}**")
-    st.markdown("---")
+    st.markdown("<h3 style='color:#2E86C1;margin-bottom:6px;'>MedSafe AI</h3>", unsafe_allow_html=True)
+    render_avatar(username, size=72)
 
-    if st.button("Logout 🔒"):
+    st.sidebar.write(f"**{username}**")
+    st.sidebar.write(f"Role: **{role}**")
+    st.sidebar.markdown("---")
+
+    # Logout button
+    if st.sidebar.button("Logout 🔒"):
         st.session_state["authenticated"] = False
+        st.session_state["username"] = None
+        st.session_state["role"] = None
+        st.session_state["last_active"] = None
+        st.success("Logged out. Redirecting to login...")
         st.rerun()
 
-    if role == "admin":
-        menu = st.radio("Menu", ["📊 Dashboard", "🧪 Testing", "📦 Inventory", "🔑 Change Password"])
-    elif role == "pharmacist":
-        menu = st.radio("Menu", ["🧪 Testing", "📦 Inventory", "🔑 Change Password"])
+    role_normalized = role.strip().lower()
+
+    if role_normalized == "admin":
+        allowed_tabs = ["📊 Dashboard", "📦 Inventory", "🔑 Change Password"]
+
+    elif role_normalized == "pharmacist":
+        allowed_tabs = ["📦 Inventory", "🧪 Testing", "🔑 Change Password"]
+
     else:
-        menu = st.radio("Menu", ["📦 Inventory"])
+        allowed_tabs = ["📦 Inventory"]
+
+    menu = st.sidebar.radio("📌 Navigation", allowed_tabs)
+
+    st.sidebar.markdown("---")
+    st.sidebar.write("© 2025 MedSafe AI")
+
 
 # =========================================================
 # 🧪 TESTING PAGE
