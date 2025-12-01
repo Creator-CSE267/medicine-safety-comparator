@@ -17,7 +17,11 @@ from pymongo import MongoClient
 from bson import ObjectId
 import certifi
 import os
-
+import joblib
+import pathlib
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 # Login + Theme
 from login import login_router
 from user_database import init_user_db
@@ -184,33 +188,126 @@ if len(np.unique(y)) < 2:
 
 
 # --------------------------
-# Train ML Model
+# Train ML Model (use per-ingredient standard deltas + persist)
 # --------------------------
-def train_model(X, y):
-    numeric_transformer = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
-    ])
 
-    pre = ColumnTransformer([
-        ("ing", TfidfVectorizer(max_features=50), "Active Ingredient"),
-        ("dis", TfidfVectorizer(max_features=50), "Disease/Use Case"),
-        ("num", numeric_transformer, num_cols),
-    ])
 
-    pipe = Pipeline([
-        ("preprocess", pre),
-        ("model", LogisticRegression(max_iter=1000)),
-    ])
+MODEL_DIR = pathlib.Path("models")
+MODEL_DIR.mkdir(exist_ok=True)
+MODEL_PATH = MODEL_DIR / "std_delta_pipeline.joblib"
+LABEL_PATH = MODEL_DIR / "std_label_encoder.joblib"
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+# compute per-ingredient standard medians (used for delta features)
+std_stats = df.groupby("Active Ingredient")[num_cols].median()
 
-    pipe.fit(X_train, y_train)
-    return pipe
+# build augmented dataset that includes deltas to standard
+def build_augmented_df(raw_df):
+    aug = raw_df.copy().reset_index(drop=True)
+    aug = aug.merge(std_stats, how="left", left_on="Active Ingredient", right_index=True, suffixes=("", "_std"))
+    global_meds = std_stats.median().to_dict()
+    for c in num_cols:
+        std_col = c + "_std"
+        if std_col not in aug.columns:
+            aug[std_col] = aug[c].map(global_meds).fillna(0)
+        else:
+            aug[std_col] = aug[std_col].fillna(global_meds.get(c, 0))
+        aug["d_" + c] = aug[c].astype(float) - aug[std_col].astype(float)
+    # drop std helper cols
+    std_cols_to_drop = [c + "_std" for c in num_cols]
+    aug = aug.drop(columns=[c for c in std_cols_to_drop if c in aug.columns], errors="ignore")
+    return aug
 
-model = train_model(X, y)
+df_aug = build_augmented_df(df)
+
+# features: text + absolute numeric + delta numeric
+text_cols = ["Active Ingredient", "Disease/Use Case"]
+abs_cols = list(num_cols)
+delta_cols = ["d_" + c for c in num_cols]
+feature_cols = text_cols + abs_cols + delta_cols
+
+X_aug = df_aug[feature_cols].copy()
+y_aug = df_aug["Safe/Not Safe"].copy()
+
+# encode target
+le = LabelEncoder()
+y_enc = le.fit_transform(y_aug)
+
+# pipeline: TF-IDF for texts + numeric imputer+scaler + RandomForest
+numeric_feature_list = abs_cols + delta_cols
+
+numeric_transformer = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
+
+preproc = ColumnTransformer([
+    ("tf_ing", TfidfVectorizer(max_features=100, ngram_range=(1,2)), "Active Ingredient"),
+    ("tf_dis", TfidfVectorizer(max_features=100, ngram_range=(1,2)), "Disease/Use Case"),
+    ("num", numeric_transformer, numeric_feature_list),
+], remainder="drop")
+
+base_clf = RandomForestClassifier(n_estimators=200, class_weight="balanced", random_state=42, n_jobs=-1)
+
+pipeline = Pipeline([
+    ("preprocess", preproc),
+    ("clf", base_clf)
+])
+
+# train / evaluate with simple holdout
+try:
+    strat = y_enc if len(np.unique(y_enc)) > 1 and len(y_enc) >= 4 else None
+    X_train, X_test, y_train, y_test = train_test_split(X_aug, y_enc, test_size=0.2, random_state=42, stratify=strat)
+    pipeline.fit(X_train, y_train)
+
+    # optional calibration (may fail if dataset small) — wrap the fitted classifier
+    try:
+        X_train_trans = pipeline.named_steps["preprocess"].transform(X_train)
+        calib = CalibratedClassifierCV(pipeline.named_steps["clf"], method="isotonic", cv=3)
+        calib.fit(X_train_trans, y_train)
+        pipeline.named_steps["clf"] = calib
+    except Exception:
+        # calibration skipped if small data or failure
+        pass
+
+    # evaluate
+    try:
+        y_pred = pipeline.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        st.success(f"Trained model holdout accuracy: {acc:.3f}")
+        st.text(classification_report(y_test, y_pred, zero_division=0))
+        st.write("Confusion matrix:")
+        st.write(confusion_matrix(y_test, y_pred))
+    except Exception:
+        st.info("Trained model but evaluation failed (likely small dataset).")
+
+    # persist pipeline & label encoder
+    try:
+        joblib.dump(pipeline, MODEL_PATH)
+        joblib.dump(le, LABEL_PATH)
+        st.info(f"Saved model and encoder to {MODEL_DIR}")
+    except Exception:
+        st.warning("Could not save model to disk (host FS may be ephemeral).")
+
+    # attach feature_names_in_ to pipeline for safe prediction ordering
+    try:
+        pipeline.feature_names_in_ = np.array(feature_cols, dtype=object)
+    except Exception:
+        pass
+
+    # set global model variable used by Testing page
+    model = pipeline
+
+except Exception:
+    import traceback; traceback.print_exc()
+    st.error("Model training failed - falling back to simple model.")
+    from sklearn.dummy import DummyClassifier
+    dummy = DummyClassifier(strategy="most_frequent")
+    try:
+        dummy.fit(X_aug.fillna(0), y_enc)
+        model = dummy
+    except Exception:
+        model = None
+
 
 # --------------------------
 # Safety Rules
@@ -304,28 +401,29 @@ with st.sidebar:
 
 
 # =========================================================
-# 🧪 TESTING PAGE
+# 🧪 TESTING PAGE (uses standard row + delta-aware model)
 # =========================================================
 if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
+    st.subheader("🔍 Search by UPC or Active Ingredient")
+
     col1, col2 = st.columns(2)
     upc_input = col1.text_input("Enter UPC")
     ingr_input = col2.text_input("Enter Active Ingredient")
 
     selected = None
 
-    # ------ Search logic ------
+    # search logic
     if upc_input:
-        match = df[df["UPC"] == upc_input]
+        match = df[df["UPC"].astype(str).str.strip() == str(upc_input).strip()]
         if not match.empty:
             selected = match.iloc[0]
             ingr_input = selected["Active Ingredient"]
             st.success(f"Found → Ingredient: {ingr_input}")
         else:
             st.error("UPC not found.")
-
     elif ingr_input:
-        match = df[df["Active Ingredient"].str.lower() == ingr_input.lower()]
+        match = df[df["Active Ingredient"].astype(str).str.lower().str.strip() == ingr_input.lower().strip()]
         if not match.empty:
             selected = match.iloc[0]
             upc_input = selected["UPC"]
@@ -339,35 +437,100 @@ if menu == "🧪 Testing":
     comp_addr = st.text_area("Address")
     comp_phone = st.text_input("Phone")
 
-    comp_vals = {c: st.number_input(c, value=0.0) for c in num_cols}
+    # competitor numeric inputs — default to selected standard values if available
+    comp_vals = {}
+    for c in num_cols:
+        default_val = float(selected.get(c, 0.0)) if selected is not None and pd.notna(selected.get(c)) else 0.0
+        comp_vals[c] = st.number_input(c, value=default_val)
+
+    def predict_against_standard(selected_standard, competitor_values):
+        if model is None:
+            return "ERROR", None
+        # build record with absolute + delta features
+        rec = {}
+        rec["Active Ingredient"] = competitor_values.get("Active Ingredient", selected_standard.get("Active Ingredient", "Unknown"))
+        rec["Disease/Use Case"] = competitor_values.get("Disease/Use Case", selected_standard.get("Disease/Use Case", "Unknown"))
+        for col in num_cols:
+            val = competitor_values.get(col, selected_standard.get(col, 0))
+            rec[col] = float(val)
+            # delta to standard: competitor - standard median (we computed std_stats at training)
+            try:
+                std_val = float(std_stats.loc[selected_standard["Active Ingredient"], col])
+            except Exception:
+                std_val = float(std_stats[col].median())
+            rec["d_" + col] = rec[col] - std_val
+
+        rec_df = pd.DataFrame([rec])
+        # ensure ordering if pipeline expects specific features
+        try:
+            if hasattr(model, "feature_names_in_"):
+                expected = list(model.feature_names_in_)
+                expected = [e for e in expected if e in rec_df.columns]
+                rec_df = rec_df[expected]
+        except Exception:
+            pass
+
+        # predict
+        try:
+            if hasattr(model, "predict_proba"):
+                probs = model.predict_proba(rec_df)[0]
+                # find safe index via label encoder
+                safe_idx = None
+                try:
+                    for i, cls in enumerate(le.classes_):
+                        if str(cls).lower() == "safe":
+                            safe_idx = i
+                            break
+                except Exception:
+                    safe_idx = None
+                prob_safe = probs[safe_idx] if safe_idx is not None and safe_idx < len(probs) else None
+                pred_raw = model.predict(rec_df)[0]
+                try:
+                    label = le.inverse_transform([pred_raw])[0]
+                except Exception:
+                    label = str(pred_raw)
+                return label, prob_safe
+            else:
+                pred_raw = model.predict(rec_df)[0]
+                label = le.inverse_transform([pred_raw])[0]
+                return label, None
+        except Exception:
+            return "ERROR", None
 
     if st.button("🔎 Compare"):
         if selected is None:
             st.error("Enter valid UPC or Ingredient first.")
         else:
-            comp_df = pd.DataFrame([{
-                "Active Ingredient": ingr_input,
-                "Disease/Use Case": "Unknown",
-                **comp_vals
-            }])
+            # prepare competitor record (include ingredient override if typed)
+            comp_record = comp_vals.copy()
+            if ingr_input:
+                comp_record["Active Ingredient"] = ingr_input
+            comp_record["Disease/Use Case"] = selected.get("Disease/Use Case", "Unknown")
 
-            pred = model.predict(comp_df)[0]
-            res = le.inverse_transform([pred])[0]
+            res, prob = predict_against_standard(selected, comp_record)
 
-            st.success(f"Prediction → **{res}**")
+            if res == "ERROR":
+                st.error("Prediction failed.")
+            else:
+                if prob is not None:
+                    st.success(f"Prediction → **{res}** (P_safe={prob:.2f})")
+                else:
+                    st.success(f"Prediction → **{res}**")
 
             # Chart
             fig, ax = plt.subplots(figsize=(10, 4))
             x = np.arange(len(num_cols))
-            ax.bar(x - 0.3, [selected[c] for c in num_cols], width=0.3, label="Standard")
-            ax.bar(x + 0.3, [comp_vals[c] for c in num_cols], width=0.3, label="Competitor")
+            std_vals = [float(selected.get(c, 0.0) or 0.0) for c in num_cols]
+            comp_vals_list = [float(comp_vals[c] or 0.0) for c in num_cols]
+            ax.bar(x - 0.3, std_vals, width=0.3, label="Standard")
+            ax.bar(x + 0.3, comp_vals_list, width=0.3, label="Competitor")
             ax.set_xticks(x)
             ax.set_xticklabels(num_cols, rotation=35, ha="right")
             ax.legend()
             st.pyplot(fig)
 
-            # Suggestions
-            if res.lower() == "not safe":
+            # Suggestions if unsafe
+            if isinstance(res, str) and res.lower() == "not safe":
                 st.error("❌ Not Safe")
                 sug = suggestions(comp_vals)
                 if sug:
@@ -375,14 +538,98 @@ if menu == "🧪 Testing":
                     for s in sug:
                         st.write("- ", s)
 
-            # Log result
-            log_col.insert_one({
+            # Log result (MongoDB or fallback)
+            log_doc = {
                 "timestamp": datetime.now().isoformat(),
                 "UPC": upc_input,
                 "Ingredient": ingr_input,
                 "Competitor": comp_name,
                 "Result": res
-            })
+            }
+            try:
+                log_col.insert_one(log_doc)
+            except Exception:
+                # fallback to CSV log
+                try:
+                    lf = "test_logs.csv"
+                    pd.DataFrame([log_doc]).to_csv(lf, mode="a", header=not os.path.exists(lf), index=False)
+                except Exception:
+                    pass
+
+            # PDF report (same layout as before)
+            try:
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+                from reportlab.lib.styles import getSampleStyleSheet
+                from reportlab.lib.pagesizes import A4
+                from reportlab.lib.utils import ImageReader
+                import io
+
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=A4)
+                styles = getSampleStyleSheet()
+                elements = []
+
+                if os.path.exists("logo.png"):
+                    try:
+                        elements.append(RLImage("logo.png", width=100, height=100))
+                        elements.append(Spacer(1, 12))
+                    except Exception:
+                        pass
+
+                elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
+                elements.append(Spacer(1, 12))
+                elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
+                elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
+                elements.append(Paragraph(f"Ingredient: {ingr_input}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
+                elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
+                elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
+                elements.append(Paragraph(f"Address: {comp_addr}", styles["Normal"]))
+                elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
+                if isinstance(res, str) and res.lower() == "safe":
+                    elements.append(Paragraph(f"<font color='green'><b>{res}</b></font>", styles["Normal"]))
+                else:
+                    elements.append(Paragraph(f"<font color='red'><b>{res}</b></font>", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                if isinstance(res, str) and res.lower() == "not safe":
+                    elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
+                    sug = suggestions(comp_vals)
+                    for s in sug:
+                        elements.append(Paragraph(f"- {s}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+
+                # attach chart image
+                chart_buffer = io.BytesIO()
+                fig.savefig(chart_buffer, format="png", bbox_inches="tight")
+                chart_buffer.seek(0)
+                try:
+                    img_reader = ImageReader(chart_buffer)
+                    elements.append(RLImage(img_reader, width=400, height=250))
+                    elements.append(Spacer(1, 12))
+                except Exception:
+                    pass
+
+                doc.build(elements)
+                buffer.seek(0)
+
+                st.download_button(
+                    label="⬇️ Download PDF Report",
+                    data=buffer.getvalue(),
+                    file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf"
+                )
+            except Exception:
+                st.warning("Failed to generate PDF report.")
+
 
 # =========================================================
 # 📊 DASHBOARD
