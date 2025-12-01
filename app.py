@@ -106,7 +106,7 @@ role = st.session_state["role"]
 st.title("💊 Medicine Safety Comparator")
 
 # --------------------------
-# Load ML Data From MongoDB
+# Load ML Data From MongoDB (SAFE MODE)
 # --------------------------
 docs = list(med_col.find({}))
 if not docs:
@@ -115,9 +115,10 @@ if not docs:
 
 df = pd.DataFrame(docs)
 
-if "_id" in df.columns:
-    df.drop(columns=["_id"], inplace=True)
+# Drop Mongo _id
+df = df.drop(columns=["_id"], errors="ignore")
 
+# Required columns for ML
 required_cols = [
     "UPC", "Active Ingredient", "Disease/Use Case",
     "Days Until Expiry", "Storage Temperature (C)",
@@ -126,38 +127,57 @@ required_cols = [
     "Warning Labels Present", "Safe/Not Safe"
 ]
 
+# Create missing columns
 for c in required_cols:
     if c not in df.columns:
         df[c] = None
 
-df["UPC"] = df["UPC"].astype(str).str.strip()
-df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown")
-df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown")
-df["Safe/Not Safe"] = df["Safe/Not Safe"].fillna("Safe")
+# Drop rows missing essential text fields
+df = df.dropna(subset=["Active Ingredient", "Disease/Use Case", "Safe/Not Safe"], how="any")
 
+# Reset index
+df = df.reset_index(drop=True)
+
+# Text cleanup
+df["UPC"] = df["UPC"].astype(str).str.strip()
+df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown").astype(str)
+df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown").astype(str)
+df["Safe/Not Safe"] = df["Safe/Not Safe"].fillna("Safe").astype(str)
+
+# Numeric fields
 num_cols = [
-    "Days Until Expiry", "Storage Temperature (C)",
-    "Dissolution Rate (%)", "Disintegration Time (minutes)",
-    "Impurity Level (%)", "Assay Purity (%)",
+    "Days Until Expiry",
+    "Storage Temperature (C)",
+    "Dissolution Rate (%)",
+    "Disintegration Time (minutes)",
+    "Impurity Level (%)",
+    "Assay Purity (%)",
     "Warning Labels Present"
 ]
 
-df[num_cols] = df[num_cols].fillna(0)
+# Convert ALL numeric fields, replace bad values with 0
+for col in num_cols:
+    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
+# Final X/Y
 X = df[["Active Ingredient", "Disease/Use Case"] + num_cols]
+y = df["Safe/Not Safe"]
 
-y = LabelEncoder().fit_transform(df["Safe/Not Safe"])
+# Encode target
 le = LabelEncoder()
-y = le.fit_transform(df["Safe/Not Safe"])
+y = le.fit_transform(y)
 
+# Ensure at least 2 classes
 if len(np.unique(y)) < 2:
     dummy = df.iloc[0].copy()
     dummy["Active Ingredient"] = "DummyUnsafe"
     dummy["Safe/Not Safe"] = "Not Safe"
+    for col in num_cols:
+        dummy[col] = 0
     df = pd.concat([df, pd.DataFrame([dummy])], ignore_index=True)
     y = le.fit_transform(df["Safe/Not Safe"])
+    X = df[["Active Ingredient", "Disease/Use Case"] + num_cols]
 
-model = None
 
 
 # --------------------------
