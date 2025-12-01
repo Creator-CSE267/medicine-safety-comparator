@@ -1,4 +1,3 @@
-[PASTE BEGINS HERE — PART 1]
 
 import streamlit as st
 import pandas as pd
