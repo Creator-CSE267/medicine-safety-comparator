@@ -17,9 +17,7 @@ from pymongo import MongoClient
 from bson import ObjectId
 import certifi
 import os
-import joblib
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
-import pathlib
+
 # Login + Theme
 from login import login_router
 from user_database import init_user_db
@@ -29,68 +27,41 @@ from styles import apply_theme, apply_layout_styles, apply_global_css, set_backg
 SESSION_TIMEOUT_SECONDS = 1800  # 30 min
 
 # --------------------------
-# MongoDB Connection (robust)
+# MongoDB Connection
 # --------------------------
 @st.cache_resource
 def get_db():
-    """
-    Robust MongoDB connector:
-    - Reads secrets from streamlit secrets (either nested dict or flat keys) or env vars.
-    - Returns a connected database object or None (app shows helpful message instead of stopping).
-    """
-    uri = None
-    dbname = None
-
-    # 1) Try nested secret block: st.secrets["MONGO"]["URI"]
     try:
-        if "MONGO" in st.secrets and isinstance(st.secrets["MONGO"], dict):
-            uri = st.secrets["MONGO"].get("URI") or st.secrets["MONGO"].get("URI".lower())
-            dbname = st.secrets["MONGO"].get("DBNAME") or st.secrets["MONGO"].get("DBNAME".lower()) or st.secrets["MONGO"].get("DB")
-    except Exception:
-        pass
-
-    # 2) Try flat secrets keys: st.secrets["MONGO_URI"], st.secrets["MONGO_DBNAME"]
-    try:
-        if not uri:
-            uri = st.secrets.get("MONGO_URI") or st.secrets.get("MONGO_URI".lower())
-        if not dbname:
-            dbname = st.secrets.get("MONGO_DBNAME") or st.secrets.get("MONGO_DB") or st.secrets.get("MONGO_DBNAME".lower())
-    except Exception:
-        pass
-
-    # 3) Fallback to environment variables
-    if not uri:
-        uri = os.getenv("MONGO_URI") or os.getenv("MONGO")
-    if not dbname:
-        dbname = os.getenv("MONGO_DBNAME") or os.getenv("MONGO_DB") or os.getenv("MONGO_DBNAME")
+        uri = st.secrets["MONGO"]["URI"]
+        dbname = st.secrets["MONGO"]["DBNAME"]
+    except:
+        uri = os.getenv("MONGO_URI")
+        dbname = os.getenv("MONGO_DBNAME")
 
     if not uri or not dbname:
-        # return None — caller must handle missing DB gracefully
-        st.warning("MongoDB not configured. Some features (persistent logging, inventory) will be disabled until you set MONGO_URI & MONGO_DBNAME in Streamlit Secrets or environment variables.")
-        return None
+        st.error("Missing MongoDB configuration.")
+        st.stop()
 
-    try:
-        client = MongoClient(uri, tls=True, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=15000)
-        client.admin.command("ping")
-        return client[dbname]
-    except Exception as e:
-        st.warning("Failed to connect to MongoDB. App will continue in degraded mode (local CSV fallback).")
-        # show debug to console only
-        import traceback; traceback.print_exc()
-        return None
+    client = MongoClient(
+        uri,
+        tls=True,
+        tlsCAFile=certifi.where(),
+        serverSelectionTimeoutMS=15000,
+    )
 
-# CALL
+    client.admin.command("ping")
+    return client[dbname]
+
 db = get_db()
 
-# If db is None, set collection variables to None; rest of the app should handle None gracefully
-if db:
-    inv_col = db["inventory"]
-    cons_col = db["consumables"]
-    log_col = db["usage_log"]
-    med_col = db["medicines"]
-    consumables_col = cons_col
-else:
-    inv_col = cons_col = log_col = med_col = consumables_col = None
+# Collections
+inv_col = db["inventory"]
+cons_col = db["consumables"]
+log_col = db["usage_log"]
+med_col = db["medicines"]
+
+# alias for older code that uses `consumables_col`
+consumables_col = cons_col
 
 # --------------------------
 # Authentication
@@ -138,17 +109,84 @@ role = st.session_state["role"]
 st.title("💊 Medicine Safety Comparator")
 
 # --------------------------
-# ML: Load existing model or train a new one and save
+# Load ML Data From MongoDB (SAFE MODE)
 # --------------------------
+docs = list(med_col.find({}))
+if not docs:
+    st.error("No ML records found in MongoDB 'medicines'.")
+    st.stop()
+
+df = pd.DataFrame(docs)
+
+# Drop Mongo _id
+df = df.drop(columns=["_id"], errors="ignore")
+
+# Required columns for ML
+required_cols = [
+    "UPC", "Active Ingredient", "Disease/Use Case",
+    "Days Until Expiry", "Storage Temperature (C)",
+    "Dissolution Rate (%)", "Disintegration Time (minutes)",
+    "Impurity Level (%)", "Assay Purity (%)",
+    "Warning Labels Present", "Safe/Not Safe"
+]
+
+# Create missing columns
+for c in required_cols:
+    if c not in df.columns:
+        df[c] = None
+
+# Drop rows missing essential text fields
+df = df.dropna(subset=["Active Ingredient", "Disease/Use Case", "Safe/Not Safe"], how="any")
+
+# Reset index
+df = df.reset_index(drop=True)
+
+# Text cleanup
+df["UPC"] = df["UPC"].astype(str).str.strip()
+df["Active Ingredient"] = df["Active Ingredient"].fillna("Unknown").astype(str)
+df["Disease/Use Case"] = df["Disease/Use Case"].fillna("Unknown").astype(str)
+df["Safe/Not Safe"] = df["Safe/Not Safe"].fillna("Safe").astype(str)
+
+# Numeric fields
+num_cols = [
+    "Days Until Expiry",
+    "Storage Temperature (C)",
+    "Dissolution Rate (%)",
+    "Disintegration Time (minutes)",
+    "Impurity Level (%)",
+    "Assay Purity (%)",
+    "Warning Labels Present"
+]
+
+# Convert ALL numeric fields, replace bad values with 0
+for col in num_cols:
+    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+# Final X/Y
+X = df[["Active Ingredient", "Disease/Use Case"] + num_cols]
+y = df["Safe/Not Safe"]
+
+# Encode target
+le = LabelEncoder()
+y = le.fit_transform(y)
+
+# Ensure at least 2 classes
+if len(np.unique(y)) < 2:
+    dummy = df.iloc[0].copy()
+    dummy["Active Ingredient"] = "DummyUnsafe"
+    dummy["Safe/Not Safe"] = "Not Safe"
+    for col in num_cols:
+        dummy[col] = 0
+    df = pd.concat([df, pd.DataFrame([dummy])], ignore_index=True)
+    y = le.fit_transform(df["Safe/Not Safe"])
+    X = df[["Active Ingredient", "Disease/Use Case"] + num_cols]
 
 
-MODEL_DIR = pathlib.Path("models")
-MODEL_DIR.mkdir(exist_ok=True)
-MODEL_PATH = MODEL_DIR / "medicine_pipeline.joblib"
-LABEL_PATH = MODEL_DIR / "label_encoder.joblib"
 
-def build_pipeline(num_cols):
-    """Construct the scikit-learn pipeline (same as training)."""
+# --------------------------
+# Train ML Model
+# --------------------------
+def train_model(X, y):
     numeric_transformer = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
@@ -162,96 +200,46 @@ def build_pipeline(num_cols):
 
     pipe = Pipeline([
         ("preprocess", pre),
-        ("model", LogisticRegression(max_iter=2000, random_state=42)),
+        ("model", LogisticRegression(max_iter=1000)),
     ])
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    pipe.fit(X_train, y_train)
     return pipe
 
-def train_and_save(X, y, num_cols, model_path=MODEL_PATH, label_path=LABEL_PATH):
-    """
-    Train pipeline on X/y, evaluate on holdout, attach feature names,
-    and save pipeline + LabelEncoder to disk.
-    """
-    # Build pipeline
-    pipe = build_pipeline(num_cols)
+model = train_model(X, y)
 
-    # Train/test split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y if len(np.unique(y))>1 else None)
+# --------------------------
+# Safety Rules
+# --------------------------
+SAFETY = {
+    "Days Until Expiry": {"min": 30},
+    "Storage Temperature (C)": {"range": (15, 30)},
+    "Dissolution Rate (%)": {"min": 80},
+    "Disintegration Time (minutes)": {"max": 30},
+    "Impurity Level (%)": {"max": 2},
+    "Assay Purity (%)": {"min": 90},
+    "Warning Labels Present": {"min": 1},
+}
 
-    # Fit
-    pipe.fit(X_train, y_train)
-
-    # Predictions and metrics
-    y_pred = pipe.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    clf_report = classification_report(y_test, y_pred, zero_division=0, output_dict=False)
-    cm = confusion_matrix(y_test, y_pred)
-
-    # Persist label encoder (le) and pipeline
-    try:
-        joblib.dump(pipe, model_path)
-    except Exception:
-        # if dumping fails, just print to logs (app continues)
-        import traceback; traceback.print_exc()
-
-    # Save label encoder as well (we assume 'le' exists in scope)
-    try:
-        joblib.dump(le, label_path)
-    except Exception:
-        import traceback; traceback.print_exc()
-
-    # Attach feature names for downstream ordering (useful for prediction-time reordering)
-    try:
-        feature_names = ["Active Ingredient", "Disease/Use Case"] + num_cols
-        # Scikit-learn expects numpy array for feature_names_in_
-        pipe.feature_names_in_ = np.array(feature_names, dtype=object)
-    except Exception:
-        pass
-
-    # Return pipeline and metrics
-    return pipe, {"accuracy": acc, "report": clf_report, "confusion_matrix": cm}
-
-def load_model_if_exists(model_path=MODEL_PATH, label_path=LABEL_PATH):
-    """Load saved pipeline and label encoder if available."""
-    if model_path.exists() and label_path.exists():
-        try:
-            loaded_pipe = joblib.load(model_path)
-            loaded_le = joblib.load(label_path)
-            # ensure feature_names_in_ exists
-            if not hasattr(loaded_pipe, "feature_names_in_"):
-                feature_names = ["Active Ingredient", "Disease/Use Case"] + num_cols
-                loaded_pipe.feature_names_in_ = np.array(feature_names, dtype=object)
-            return loaded_pipe, loaded_le
-        except Exception:
-            import traceback; traceback.print_exc()
-            return None, None
-    return None, None
-
-# Attempt to load existing model
-model_loaded, le_loaded = load_model_if_exists()
-
-if model_loaded is not None and le_loaded is not None:
-    model = model_loaded
-    le = le_loaded
-    st.success("Loaded saved ML pipeline and label encoder from disk.")
-else:
-    # Train new model and save it
-    with st.spinner("Training ML model (this may take a few seconds)..."):
-        try:
-            model, metrics = train_and_save(X, y, num_cols)
-            st.success(f"Model trained and saved ({MODEL_PATH}). Accuracy (holdout): {metrics['accuracy']:.3f}")
-            st.text("Classification report (holdout):")
-            st.text(metrics["report"])
-        except Exception as e:
-            st.error("Failed to train model.")
-            import traceback; traceback.print_exc()
-            # If training fails, try to build a minimal fallback model to keep the app alive
-            model = build_pipeline(num_cols)
-            # Fit on full data if possible (best-effort)
-            try:
-                model.fit(X, y)
-                st.warning("Trained fallback model on full data.")
-            except Exception:
-                st.error("Could not fit fallback model. Prediction features may not work.")
+def suggestions(vals):
+    out = []
+    for col, val in vals.items():
+        rule = SAFETY.get(col)
+        if not rule:
+            continue
+        if "min" in rule and val < rule["min"]:
+            out.append(f"Increase *{col}* (min {rule['min']}).")
+        if "max" in rule and val > rule["max"]:
+            out.append(f"Reduce *{col}* (max {rule['max']}).")
+        if "range" in rule:
+            lo, hi = rule["range"]
+            if not (lo <= val <= hi):
+                out.append(f"Keep *{col}* within {lo}-{hi}.")
+    return out
 
 # --------------------------
 # Sidebar Navigation
@@ -316,254 +304,85 @@ with st.sidebar:
 
 
 # =========================================================
-# 🧪 TESTING PAGE (robust + Mongo logging + PDF)
+# 🧪 TESTING PAGE
 # =========================================================
 if menu == "🧪 Testing":
     st.header("🧪 Medicine Safety Testing")
-
-    # Use a form so page doesn't refresh mid-entry
-    with st.form("testing_form"):
-        col1, col2 = st.columns(2)
-        upc_input = col1.text_input("Enter UPC").strip()
-        ingr_input = col2.text_input("Enter Active Ingredient").strip()
-
-        st.subheader("🏭 Competitor Details")
-        comp_name = st.text_input("Competitor Name").strip()
-        comp_gst = st.text_input("GST Number").strip()
-        comp_addr = st.text_area("Address").strip()
-        comp_phone = st.text_input("Phone").strip()
-
-        # numeric inputs
-        competitor_values = {}
-        for c in num_cols:
-            competitor_values[c] = st.number_input(c, value=0.0, format="%.6f")
-
-        submitted = st.form_submit_button("🔎 Compare")
+    col1, col2 = st.columns(2)
+    upc_input = col1.text_input("Enter UPC")
+    ingr_input = col2.text_input("Enter Active Ingredient")
 
     selected = None
-    result = None
-    suggestions_list = []
 
-    if submitted:
-        # normalize search inputs
-        upc_norm = (upc_input or "").strip()
-        ingr_norm = (ingr_input or "").strip().lower()
-
-        # prefer UPC lookup
-        if upc_norm:
-            # safe compare (make sure UPC column exists)
-            if "UPC" in df.columns:
-                match = df[df["UPC"].astype(str).str.strip() == upc_norm]
-            else:
-                match = df[df["UPC"].astype(str).str.lower().str.contains(upc_norm.lower(), na=False)]
-            if not match.empty:
-                selected = match.iloc[0].to_dict()
-                ingr_input = selected.get("Active Ingredient", ingr_input)
-                st.success(f"Found → Ingredient: {ingr_input}")
-            else:
-                st.error("UPC not found. Try the full or partial UPC or use Active Ingredient search.")
-        elif ingr_norm:
-            if "Active Ingredient" in df.columns:
-                match = df[df["Active Ingredient"].fillna("").str.lower().str.strip() == ingr_norm]
-            else:
-                match = df[df["Active Ingredient"].fillna("").str.lower().str.contains(ingr_norm, na=False)]
-            if not match.empty:
-                selected = match.iloc[0].to_dict()
-                upc_input = str(selected.get("UPC", ""))
-                st.success(f"Found → UPC: {upc_input}")
-            else:
-                st.error("Ingredient not found.")
+    # ------ Search logic ------
+    if upc_input:
+        match = df[df["UPC"] == upc_input]
+        if not match.empty:
+            selected = match.iloc[0]
+            ingr_input = selected["Active Ingredient"]
+            st.success(f"Found → Ingredient: {ingr_input}")
         else:
-            st.error("Enter a UPC or an Active Ingredient to search first.")
+            st.error("UPC not found.")
 
-        # if we found a standard record, build competitor DataFrame and predict
-        if selected is not None:
-            # Build competitor record ensuring all numeric cols present and are floats
-            comp_record = {}
-            for c in num_cols:
-                try:
-                    comp_record[c] = float(competitor_values.get(c, 0.0))
-                except Exception:
-                    comp_record[c] = 0.0
+    elif ingr_input:
+        match = df[df["Active Ingredient"].str.lower() == ingr_input.lower()]
+        if not match.empty:
+            selected = match.iloc[0]
+            upc_input = selected["UPC"]
+            st.success(f"Found → UPC: {upc_input}")
+        else:
+            st.error("Ingredient not found.")
 
-            comp_record["Active Ingredient"] = ingr_input or selected.get("Active Ingredient", "")
-            # include Disease/Use Case if available in df
-            comp_record["Disease/Use Case"] = selected.get("Disease/Use Case", "Unknown") if "Disease/Use Case" in df.columns else "Unknown"
+    st.subheader("🏭 Competitor Details")
+    comp_name = st.text_input("Competitor Name")
+    comp_gst = st.text_input("GST Number")
+    comp_addr = st.text_area("Address")
+    comp_phone = st.text_input("Phone")
 
-            comp_df = pd.DataFrame([comp_record])
+    comp_vals = {c: st.number_input(c, value=0.0) for c in num_cols}
 
-            # Ensure columns ordering matches the model features when possible
-            try:
-                if hasattr(model, "feature_names_in_"):
-                    feat_names = list(model.feature_names_in_)
-                    # Keep only features present in comp_df
-                    feat_names = [f for f in feat_names if f in comp_df.columns]
-                    comp_df = comp_df[feat_names]
-            except Exception:
-                pass
+    if st.button("🔎 Compare"):
+        if selected is None:
+            st.error("Enter valid UPC or Ingredient first.")
+        else:
+            comp_df = pd.DataFrame([{
+                "Active Ingredient": ingr_input,
+                "Disease/Use Case": "Unknown",
+                **comp_vals
+            }])
 
-            # Predict with robust error handling
-            try:
-                pred = model.predict(comp_df)
-                pred_val = pred[0] if hasattr(pred, "__len__") else pred
-                if 'le' in globals() and hasattr(le, "inverse_transform"):
-                    result = le.inverse_transform([pred_val])[0]
-                else:
-                    result = str(pred_val)
-            except Exception:
-                st.error("Prediction failed — the model could not process the input. Check features/dtypes in your dataset.")
-                import traceback; traceback.print_exc()
-                result = "ERROR"
+            pred = model.predict(comp_df)[0]
+            res = le.inverse_transform([pred])[0]
 
-            # Display prediction
-            if result and result != "ERROR":
-                if result.lower() == "safe":
-                    st.success(f"Prediction → **{result}**")
-                else:
-                    st.error(f"Prediction → **{result}**")
+            st.success(f"Prediction → **{res}**")
 
-            # Chart: Standard vs Competitor
-            try:
-                fig, ax = plt.subplots(figsize=(10, 4))
-                x = np.arange(len(num_cols))
-                std_vals = [float(selected.get(c, 0.0)) if selected.get(c, None) is not None else 0.0 for c in num_cols]
-                comp_vals_plot = [float(comp_record.get(c, 0.0)) for c in num_cols]
+            # Chart
+            fig, ax = plt.subplots(figsize=(10, 4))
+            x = np.arange(len(num_cols))
+            ax.bar(x - 0.3, [selected[c] for c in num_cols], width=0.3, label="Standard")
+            ax.bar(x + 0.3, [comp_vals[c] for c in num_cols], width=0.3, label="Competitor")
+            ax.set_xticks(x)
+            ax.set_xticklabels(num_cols, rotation=35, ha="right")
+            ax.legend()
+            st.pyplot(fig)
 
-                width = 0.35
-                bars1 = ax.bar(x - width/2, std_vals, width=width, label="Standard")
-                bars2 = ax.bar(x + width/2, comp_vals_plot, width=width, label="Competitor")
-                ax.set_xticks(x)
-                ax.set_xticklabels(num_cols, rotation=35, ha="right")
-                ax.set_ylabel("Value")
-                ax.set_title(f"Standard vs Competitor — {comp_name or 'Competitor'}")
-                ax.legend()
-                for bar in bars1 + bars2:
-                    h = bar.get_height()
-                    ax.annotate(f"{h:.2f}", xy=(bar.get_x() + bar.get_width() / 2, h),
-                                xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8)
-                st.pyplot(fig)
-            except Exception:
-                st.warning("Could not draw comparison chart.")
-
-            # Suggestions based on safety rules (if not safe)
-            if isinstance(result, str) and result.lower() == "not safe":
+            # Suggestions
+            if res.lower() == "not safe":
                 st.error("❌ Not Safe")
-                try:
-                    suggestions_list = suggestions(comp_record)
-                    if suggestions_list:
-                        st.subheader("Improvements")
-                        for s in suggestions_list:
-                            st.write("- ", s)
-                except Exception:
-                    st.warning("Could not compute suggestions.")
+                sug = suggestions(comp_vals)
+                if sug:
+                    st.subheader("Improvements")
+                    for s in sug:
+                        st.write("- ", s)
 
-            # ---- LOG to MongoDB (with CSV fallback) ----
-            log_doc = {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            # Log result
+            log_col.insert_one({
+                "timestamp": datetime.now().isoformat(),
                 "UPC": upc_input,
                 "Ingredient": ingr_input,
                 "Competitor": comp_name,
-                "Competitor_GST": comp_gst,
-                "Result": result
-            }
-
-            # try Mongo insert if log_col exists
-            logged = False
-            if log_col is not None:
-                try:
-                    log_col.insert_one(log_doc)
-                    st.info("Result logged to MongoDB.")
-                    logged = True
-                except Exception:
-                    st.warning("MongoDB write failed — will fallback to local CSV.")
-                    import traceback; traceback.print_exc()
-
-            # fallback CSV
-            if not logged:
-                try:
-                    fallback_file = "test_logs.csv"
-                    tmp_df = pd.DataFrame([log_doc])
-                    if not os.path.exists(fallback_file):
-                        tmp_df.to_csv(fallback_file, index=False)
-                    else:
-                        tmp_df.to_csv(fallback_file, mode="a", header=False, index=False)
-                    st.info(f"Result logged to local CSV: {fallback_file}")
-                except Exception:
-                    st.error("Failed to log result to MongoDB or local CSV.")
-
-            # --- PDF report (same pattern you had) ---
-            try:
-                import io
-                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-                from reportlab.lib.styles import getSampleStyleSheet
-                from reportlab.lib.pagesizes import A4
-                from reportlab.lib.utils import ImageReader
-
-                buffer = io.BytesIO()
-                doc = SimpleDocTemplate(buffer, pagesize=A4)
-                styles = getSampleStyleSheet()
-                elements = []
-
-                if os.path.exists("logo.png"):
-                    try:
-                        elements.append(RLImage("logo.png", width=100, height=100))
-                        elements.append(Spacer(1, 12))
-                    except Exception:
-                        pass
-
-                elements.append(Paragraph("💊 Medicine Safety Comparison Report", styles["Title"]))
-                elements.append(Spacer(1, 12))
-                elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                elements.append(Paragraph("<b>Standard Medicine</b>", styles["Heading2"]))
-                elements.append(Paragraph(f"UPC: {upc_input}", styles["Normal"]))
-                elements.append(Paragraph(f"Ingredient: {ingr_input}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                elements.append(Paragraph("<b>Competitor Medicine</b>", styles["Heading2"]))
-                elements.append(Paragraph(f"Name: {comp_name}", styles["Normal"]))
-                elements.append(Paragraph(f"GST Number: {comp_gst}", styles["Normal"]))
-                elements.append(Paragraph(f"Address: {comp_addr}", styles["Normal"]))
-                elements.append(Paragraph(f"Phone: {comp_phone}", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                elements.append(Paragraph("<b>Prediction Result</b>", styles["Heading2"]))
-                if result and result.lower() == "safe":
-                    elements.append(Paragraph(f"<font color='green'><b>{result}</b></font>", styles["Normal"]))
-                else:
-                    elements.append(Paragraph(f"<font color='red'><b>{result}</b></font>", styles["Normal"]))
-                elements.append(Spacer(1, 12))
-
-                if result and result.lower() == "not safe" and suggestions_list:
-                    elements.append(Paragraph("<b>⚠️ Suggested Improvements:</b>", styles["Heading2"]))
-                    for s in suggestions_list:
-                        elements.append(Paragraph(f"- {s}", styles["Normal"]))
-                    elements.append(Spacer(1, 12))
-
-                # attach chart if available
-                try:
-                    chart_buffer = io.BytesIO()
-                    fig.savefig(chart_buffer, format="png", bbox_inches="tight")
-                    chart_buffer.seek(0)
-                    img_reader = ImageReader(chart_buffer)
-                    elements.append(RLImage(img_reader, width=400, height=250))
-                    elements.append(Spacer(1, 12))
-                except Exception:
-                    pass
-
-                doc.build(elements)
-                buffer.seek(0)
-
-                st.download_button(
-                    label="⬇️ Download PDF Report",
-                    data=buffer.getvalue(),
-                    file_name=f"Medicine_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf"
-                )
-            except Exception:
-                st.warning("Failed to generate PDF report.")
-
+                "Result": res
+            })
 
 # =========================================================
 # 📊 DASHBOARD
