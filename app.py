@@ -1179,36 +1179,52 @@ elif menu == "📦 Inventory":
         c1.metric("Total Medicines", total_items)
         c2.metric("Total Stock", int(total_stock))
                 # -------------------------------------------
-        # EXPIRY-BASED KPIs
+        # EXPIRY-BASED KPIs (SAFE VERSION)
         # -------------------------------------------
         from datetime import timedelta
 
         today = datetime.today().date()
 
         meds_exp = meds.copy()
-        meds_exp["Expiry"] = pd.to_datetime(meds_exp["Expiry"], errors="coerce").dt.date
 
-        # 1. Expired
-        expired_df = meds_exp[meds_exp["Expiry"] < today]
-        expired_count = len(expired_df)
+        # Convert expiry safely
+        meds_exp["Expiry"] = pd.to_datetime(
+            meds_exp["Expiry"], errors="coerce"
+        ).dt.date
 
-        # 2. Expiring Soon (Next 30 Days)
-        soon_df = meds_exp[
-            (meds_exp["Expiry"] >= today) &
-            (meds_exp["Expiry"] <= today + timedelta(days=30))
-        ]
-        soon_count = len(soon_df)
+        # Remove rows where expiry is NaT (None)
+        meds_valid = meds_exp.dropna(subset=["Expiry"]).copy()
 
-        # 3. Next Expiry
-        next_exp_date = meds_exp[meds_exp["Expiry"] >= today]["Expiry"].min()
-        next_exp_display = (
-            next_exp_date.strftime("%Y-%m-%d") if pd.notna(next_exp_date) else "No upcoming"
-        )
+        # Avoid errors if empty
+        if meds_valid.empty:
+            expired_count = 0
+            soon_count = 0
+            next_exp_display = "No data"
+        else:
+            # 1. Expired
+            expired_df = meds_valid[meds_valid["Expiry"] < today]
+            expired_count = len(expired_df)
+
+            # 2. Expiring soon (next 30 days)
+            soon_df = meds_valid[
+                (meds_valid["Expiry"] >= today) &
+                (meds_valid["Expiry"] <= today + timedelta(days=30))
+            ]
+            soon_count = len(soon_df)
+
+            # 3. Next expiry date
+            next_exp_date = meds_valid[meds_valid["Expiry"] >= today]["Expiry"].min()
+            next_exp_display = (
+                next_exp_date.strftime("%Y-%m-%d")
+                if pd.notna(next_exp_date)
+                else "No upcoming"
+            )
 
         ex1, ex2, ex3 = st.columns(3)
         ex1.metric("❌ Expired", expired_count)
         ex2.metric("⚠️ Expiring Soon (30 days)", soon_count)
         ex3.metric("📅 Next Expiry", next_exp_display)
+
 
 
         # Add / Update form (Medicines)
